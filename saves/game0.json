@@ -1,0 +1,303 @@
+{
+  "map": [
+    {
+      "path": "map.tmx",
+      "teleport": [
+        {
+          "x": 24,
+          "y": 23,
+          "destination": "gym.tmx"
+        },
+        {
+          "x": 2,
+          "y": 8,
+          "destination": "tile1.tmx"
+        },
+        {
+          "x": 2,
+          "y": 9,
+          "destination": "tile1.tmx"
+        },
+        {
+          "x": 2,
+          "y": 10,
+          "destination": "tile1.tmx"
+        },
+        {
+          "x": 2,
+          "y": 11,
+          "destination": "tile1.tmx"
+        },
+        {
+          "x": 2,
+          "y": 12,
+          "destination": "tile1.tmx"
+        }
+      ],
+      "player": {
+        "x": 16,
+        "y": 20
+      },
+      "enemy_trainers": [
+        {
+          "x": 24.0,
+          "y": 29.0,
+          "classification": "stationary",
+          "facing": "DOWN",
+          "max_tiles": 2,
+          "name": "Trainer",
+          "sprite_path": "character/ow2.png"
+        },
+        {
+          "x": 54.0,
+          "y": 16.0,
+          "classification": "stationary",
+          "facing": "UP",
+          "max_tiles": 2,
+          "name": "Trainer",
+          "sprite_path": "character/ow2.png"
+        },
+        {
+          "x": 31.0,
+          "y": 31.0,
+          "classification": "stationary",
+          "facing": "UP",
+          "max_tiles": 2,
+          "name": "Trainer",
+          "sprite_path": "character/ow2.png"
+        }
+      ],
+      "shopkeepers": [
+        {
+          "x": 7.0,
+          "y": 10.0,
+          "name": "Poke Mart Clerk",
+          "facing": "DOWN",
+          "shop_items": [
+            {
+              "name": "Potion",
+              "price": 5,
+              "count": 7
+            },
+            {
+              "name": "Super Potion",
+              "price": 10,
+              "count": 4
+            },
+            {
+              "name": "Pokeball",
+              "price": 20,
+              "count": 14
+            },
+            {
+              "name": "Great Ball",
+              "price": 60,
+              "count": 8
+            },
+            {
+              "name": "Ultra Ball",
+              "price": 120,
+              "count": 3
+            }
+          ],
+          "sprite_path": "character/ow3.png"
+        }
+      ]
+    },
+    {
+      "path": "gym.tmx",
+      "teleport": [
+        {
+          "x": 11,
+          "y": 14,
+          "destination": "map.tmx"
+        },
+        {
+          "x": 12,
+          "y": 14,
+          "destination": "map.tmx"
+        },
+        {
+          "x": 13,
+          "y": 14,
+          "destination": "map.tmx"
+        }
+      ],
+      "player": {
+        "x": 12.0,
+        "y": 14.0
+      },
+      "enemy_trainers": [],
+      "shopkeepers": []
+    },
+    {
+      "path": "tile1.tmx",
+      "teleport": [
+        {
+          "x": 28,
+          "y": 8,
+          "destination": "map.tmx"
+        },
+        {
+          "x": 28,
+          "y": 9,
+          "destination": "map.tmx"
+        },
+        {
+          "x": 28,
+          "y": 10,
+          "destination": "map.tmx"
+        },
+        {
+          "x": 28,
+          "y": 11,
+          "destination": "map.tmx"
+        },
+        {
+          "x": 28,
+          "y": 12,
+          "destination": "map.tmx"
+        }
+      ],
+      "player": {
+        "x": 28,
+        "y": 10
+      },
+      "enemy_trainers": [],
+      "shopkeepers": []
+    }
+  ],
+  "current_map": "map.tmx",
+  "player": {
+    "x": 48.254481517813815,
+    "y": 23.933328291202358
+  },
+  "bag": {
+    "monsters": [
+      {
+        "name": "Pikachu",
+        "hp": 120,
+        "max_hp": 180,
+        "level": 25,
+        "sprite_path": "menu_sprites/menusprite16.png",
+        "element": "Electric",
+        "evolved_form": "",
+        "evolution_level": 0
+      },
+      {
+        "name": "Charmander",
+        "hp": 50,
+        "max_hp": 50,
+        "level": 15,
+        "sprite_path": "menu_sprites/menusprite7.png",
+        "element": "Fire",
+        "evolved_form": "Charmeleon",
+        "evolution_level": 16
+      },
+      {
+        "name": "Blastoise",
+        "hp": 120,
+        "max_hp": 180,
+        "level": 32,
+        "sprite_path": "menu_sprites/menusprite14.png",
+        "element": "Water",
+        "evolved_form": "",
+        "evolution_level": 0
+      },
+      {
+        "name": "Bulbasaur",
+        "hp": 60,
+        "max_hp": 60,
+        "level": 15,
+        "sprite_path": "menu_sprites/menusprite1.png",
+        "element": "Grass",
+        "evolved_form": "Ivysaur",
+        "evolution_level": 16
+      },
+      {
+        "name": "Arcanine",
+        "hp": 110,
+        "max_hp": 155,
+        "level": 12,
+        "sprite_path": "menu_sprites/menusprite6.png",
+        "element": "Ice",
+        "evolved_form": "",
+        "evolution_level": 0
+      },
+      {
+        "name": "Dragonite",
+        "hp": 180,
+        "max_hp": 220,
+        "level": 40,
+        "sprite_path": "menu_sprites/menusprite11.png",
+        "element": "Dragon",
+        "evolved_form": "",
+        "evolution_level": 0
+      },
+      {
+        "name": "Pichu",
+        "hp": 35,
+        "max_hp": 50,
+        "level": 2,
+        "sprite_path": "menu_sprites/menusprite15.png",
+        "element": "Electric",
+        "evolved_form": "Pikachu",
+        "evolution_level": 20
+      },
+      {
+        "name": "Pidgey",
+        "hp": 39,
+        "max_hp": 50,
+        "level": 5,
+        "sprite_path": "menu_sprites/menusprite5.png",
+        "element": "Flying",
+        "evolved_form": "",
+        "evolution_level": 0
+      }
+    ],
+    "items": [
+      {
+        "name": "Heal Potion",
+        "count": 5,
+        "sprite_path": "ingame_ui/potion.png",
+        "item_type": "heal"
+      },
+      {
+        "name": "Strength Potion",
+        "count": 3,
+        "sprite_path": "ingame_ui/potion.png",
+        "item_type": "strength"
+      },
+      {
+        "name": "Defense Potion",
+        "count": 3,
+        "sprite_path": "ingame_ui/potion.png",
+        "item_type": "defense"
+      },
+      {
+        "name": "Coins",
+        "count": 3655,
+        "sprite_path": "ingame_ui/coin.png",
+        "item_type": null
+      },
+      {
+        "name": "Pokeball",
+        "count": 2,
+        "sprite_path": "ingame_ui/ball.png",
+        "item_type": "pokeball"
+      },
+      {
+        "name": "Great Ball",
+        "count": 2,
+        "sprite_path": "ingame_ui/ball.png",
+        "item_type": "pokeball"
+      },
+      {
+        "name": "Ultra Ball",
+        "count": 1,
+        "sprite_path": "ingame_ui/ball.png",
+        "item_type": "pokeball"
+      }
+    ]
+  }
+}
