@@ -9,6 +9,7 @@ from typing import override
 
 class Player(Entity):
     speed: float = 4.0 * GameSettings.TILE_SIZE
+    sprint_multiplier: float = 2.0  # Sprint speed multiplier
     game_manager: GameManager
     is_moving: bool = False
 
@@ -42,12 +43,17 @@ class Player(Entity):
         elif dis.y < 0:
             self._set_direction("up")
 
+        # --- Check for sprint ---
+        current_speed = self.speed
+        if input_manager.key_down(pg.K_LSHIFT) or input_manager.key_down(pg.K_RSHIFT):
+            current_speed *= self.sprint_multiplier
+
         # --- Normalize and scale ---
         length = math.hypot(dis.x, dis.y)
         self.is_moving = length > 0
         if length > 0:
-            dis.x = (dis.x / length) * self.speed * dt
-            dis.y = (dis.y / length) * self.speed * dt
+            dis.x = (dis.x / length) * current_speed * dt
+            dis.y = (dis.y / length) * current_speed * dt
 
         # --- Apply movement separately for X and Y ---
         # --- X axis ---
