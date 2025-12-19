@@ -46,6 +46,11 @@ class SceneManager:
     def draw(self, screen: pg.Surface) -> None:
         if self._current_scene:
             self._current_scene.draw(screen)
+    
+    def handle_event(self, event: pg.event.Event) -> None:
+        """Forward events to the current scene."""
+        if self._current_scene and hasattr(self._current_scene, 'handle_event'):
+            self._current_scene.handle_event(event)
             
     def _perform_scene_switch(self) -> None:
         if self._next_scene is None:

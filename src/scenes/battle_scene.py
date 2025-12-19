@@ -223,6 +223,18 @@ class BattleScene(Scene):
         self.player_idle_sprite = None
         self.enemy_idle_sprite = None
         
+        # Idle animation frames (cycle through 4 frames)
+        self.player_idle_frames = []  # List of 4 frames
+        self.enemy_idle_frames = []   # List of 4 frames
+        self.player_attack_frames = []  # List of 4 attack frames
+        self.enemy_attack_frames = []   # List of 4 attack frames
+        self.idle_frame_index = 0
+        self.idle_animation_timer = 0.0
+        self.idle_animation_speed = 0.2  # Seconds per frame (5 FPS animation)
+        
+        # Load animation frames for both Pokemon
+        self._load_animation_frames()
+        
         # Ball throwing animation
         self.ball_throwing = False
         self.ball_throw_timer = 0.0
@@ -249,27 +261,33 @@ class BattleScene(Scene):
         self.player_moves = safe_get_moves(self.player_mon)
         self.enemy_moves = safe_get_moves(self.enemy_mon)
 
-        # Text menu items (vertical list like Gen1)
+        # Text menu items (horizontal layout)
         sw, sh = GameSettings.SCREEN_WIDTH, GameSettings.SCREEN_HEIGHT
-        menu_x = 40
-        menu_y = sh - 170
-        menu_w = 360
+        menu_y = sh - 100  # Position near bottom
+        menu_w = 150  # Narrower buttons for horizontal layout
         menu_h = 40
-        gap = 46
+        gap = 160  # Horizontal gap between buttons
+        total_width = 4 * menu_w + 3 * (gap - menu_w)  # Total width of all buttons
+        menu_start_x = (sw - total_width) // 2  # Center horizontally
 
-        # Main command text buttons (FIGHT, BAG, MONSTERS, RUN)
+        # Main command text buttons (FIGHT, BAG, MONSTERS, RUN) - horizontal layout
         self.main_buttons = [
-            TextButton(menu_x, menu_y + 0 * gap, menu_w, menu_h, "FIGHT", on_click=self.open_fight),
-            TextButton(menu_x, menu_y + 1 * gap, menu_w, menu_h, "BAG", on_click=self.open_bag),
-            TextButton(menu_x, menu_y + 2 * gap, menu_w, menu_h, "MONSTERS", on_click=self.open_monsters),
-            TextButton(menu_x, menu_y + 3 * gap, menu_w, menu_h, "RUN", on_click=self.attempt_run),
+            TextButton(menu_start_x + 0 * gap, menu_y, menu_w, menu_h, "FIGHT", on_click=self.open_fight),
+            TextButton(menu_start_x + 1 * gap, menu_y, menu_w, menu_h, "BAG", on_click=self.open_bag),
+            TextButton(menu_start_x + 2 * gap, menu_y, menu_w, menu_h, "MONSTERS", on_click=self.open_monsters),
+            TextButton(menu_start_x + 3 * gap, menu_y, menu_w, menu_h, "RUN", on_click=self.attempt_run),
         ]
 
-        # Fight menu move buttons (reused when in fight submenu)
+        # Fight menu move buttons (reused when in fight submenu) - horizontal layout
         self.move_buttons = []
+        move_btn_w = 150
+        move_gap = 160  # Horizontal gap between buttons
+        move_total_width = 4 * move_btn_w + 3 * (move_gap - move_btn_w)
+        move_start_x = (sw - move_total_width) // 2  # Center horizontally
+        move_menu_y = sh - 100  # Same y position as main buttons
         for i in range(4):
-            y = menu_y + i * gap
-            self.move_buttons.append(TextButton(menu_x, y, menu_w, menu_h, self.player_moves[i]["name"], on_click=(lambda i=i: self.player_use_move(i))))
+            x = move_start_x + i * move_gap
+            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, self.player_moves[i]["name"], on_click=(lambda i=i: self.player_use_move(i))))
         # Bag & monsters minimal placeholders (will show dialog)
         self.items = self._load_items_from_player()  # list of item dicts: {"name","count","heal"}
         self.item_buttons = []
@@ -328,6 +346,22 @@ class BattleScene(Scene):
                 if bag_item["count"] == 0:
                     self.bag.items.remove(bag_item)
                 break
+
+    def _rebuild_move_buttons(self):
+        """Rebuild move buttons for the current player monster."""
+        sw, sh = GameSettings.SCREEN_WIDTH, GameSettings.SCREEN_HEIGHT
+        menu_h = 40
+        move_btn_w = 150
+        move_gap = 160
+        move_total_width = 4 * move_btn_w + 3 * (move_gap - move_btn_w)
+        move_start_x = (sw - move_total_width) // 2
+        move_menu_y = sh - 100
+        
+        self.move_buttons = []
+        for i in range(4):
+            x = move_start_x + i * move_gap
+            move_name = self.player_moves[i]["name"] if i < len(self.player_moves) else "---"
+            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, move_name, on_click=(lambda i=i: self.player_use_move(i))))
     
 
     def enqueue_message(self, msg: str, duration: Optional[float] = None):
@@ -441,6 +475,71 @@ class BattleScene(Scene):
             elif sprite is not None and isinstance(sprite, pg.Surface) and not is_empty_sprite:
                 # Sprite exists and is valid, just wrong size - scale it
                 self.enemy_mon["sprite"] = pg.transform.scale(sprite, (300, 300))
+
+    def _load_animation_frames(self):
+        """Load all animation frames for both player and enemy Pokemon."""
+        # Load player idle and attack frames
+        self.player_idle_frames = self._get_all_frames_from_sheet(self.player_mon, "idle")
+        self.player_attack_frames = self._get_all_frames_from_sheet(self.player_mon, "attack")
+        
+        # Load enemy idle and attack frames
+        self.enemy_idle_frames = self._get_all_frames_from_sheet(self.enemy_mon, "idle")
+        self.enemy_attack_frames = self._get_all_frames_from_sheet(self.enemy_mon, "attack")
+        
+        # Store initial idle sprites for reference
+        if self.player_idle_frames:
+            self.player_idle_sprite = self.player_idle_frames[0]
+        if self.enemy_idle_frames:
+            self.enemy_idle_sprite = self.enemy_idle_frames[0]
+
+    def _get_all_frames_from_sheet(self, pokemon: dict, animation_type: str = "idle") -> list:
+        """Load all 4 frames from a sprite sheet (idle or attack)."""
+        frames = []
+        try:
+            sprite_path = pokemon.get("sprite_path", "")
+            if "menu_sprites" in sprite_path:
+                # Extract sprite number from menusprite path
+                sprite_num = sprite_path.split("menusprite")[-1].split(".")[0]
+                # Load sprite sheet
+                sprite_sheet_path = str(Path("assets") / "images" / "sprites" / f"sprite{sprite_num}_{animation_type}.png")
+                sprite_sheet = pg.image.load(sprite_sheet_path).convert_alpha()
+                
+                # Extract all 4 frames
+                for frame_idx in range(4):
+                    frame = self._extract_sprite_frame(sprite_sheet, frame_idx)
+                    frames.append(frame)
+        except Exception as e:
+            pass
+        
+        return frames
+
+    def _get_current_player_sprite(self) -> Optional[pg.Surface]:
+        """Get the current sprite for the player Pokemon (animated or static)."""
+        # If attack animation is active, use attack frames
+        if self.attack_animation_timer > 0 and self.attacking_pokemon == "player":
+            if self.player_attack_frames:
+                return self.player_attack_frames[self.idle_frame_index % len(self.player_attack_frames)]
+        
+        # Use idle animation frames if available
+        if self.player_idle_frames:
+            return self.player_idle_frames[self.idle_frame_index % len(self.player_idle_frames)]
+        
+        # Fallback to static sprite
+        return self.player_mon.get("sprite")
+
+    def _get_current_enemy_sprite(self) -> Optional[pg.Surface]:
+        """Get the current sprite for the enemy Pokemon (animated or static)."""
+        # If attack animation is active, use attack frames
+        if self.attack_animation_timer > 0 and self.attacking_pokemon == "enemy":
+            if self.enemy_attack_frames:
+                return self.enemy_attack_frames[self.idle_frame_index % len(self.enemy_attack_frames)]
+        
+        # Use idle animation frames if available
+        if self.enemy_idle_frames:
+            return self.enemy_idle_frames[self.idle_frame_index % len(self.enemy_idle_frames)]
+        
+        # Fallback to static sprite
+        return self.enemy_mon.get("sprite")
 
     def _draw_pokemon_info_banner(self, screen: pg.Surface, pokemon: dict, x: int, y: int, is_player: bool = True) -> None:
         """Draw a Pokemon info banner with name, element, and HP bar."""
@@ -584,8 +683,8 @@ class BattleScene(Scene):
         self.monster_buttons = []
         sw, sh = GameSettings.SCREEN_WIDTH, GameSettings.SCREEN_HEIGHT
         self._monster_menu_x = 40
-        self._monster_menu_y = sh - 175  # Moved down to stay within box
-        self._monster_gap = 38
+        self._monster_menu_y = sh - 155  # Moved down further
+        self._monster_gap = 36
         
         # Maximum visible monsters (show 4 at a time)
         self._max_visible_monsters = 4
@@ -678,6 +777,14 @@ class BattleScene(Scene):
         self.player_mon = party[idx]
         # Reload sprites for the new active monster
         self._ensure_monster_sprites()
+        # Reload animation frames for the new monster
+        self.player_idle_frames = self._get_all_frames_from_sheet(self.player_mon, "idle")
+        self.player_attack_frames = self._get_all_frames_from_sheet(self.player_mon, "attack")
+        if self.player_idle_frames:
+            self.player_idle_sprite = self.player_idle_frames[0]
+        # Update moves for the new monster
+        self.player_moves = safe_get_moves(self.player_mon)
+        self._rebuild_move_buttons()
         self.enqueue_message(f"Switched {old_mon['name']} out! {self.player_mon['name']} is now active.")
         self.submenu = "main"
         self.turn = "enemy"
@@ -767,6 +874,11 @@ class BattleScene(Scene):
                 # Reload sprite for evolved form
                 self.player_mon["sprite"] = None
                 self._ensure_monster_sprites()
+                # Reload animation frames for the evolved form
+                self.player_idle_frames = self._get_all_frames_from_sheet(self.player_mon, "idle")
+                self.player_attack_frames = self._get_all_frames_from_sheet(self.player_mon, "attack")
+                if self.player_idle_frames:
+                    self.player_idle_sprite = self.player_idle_frames[0]
             
             # Check if enemy has more monsters
             self.enemy_mon_index += 1
@@ -779,6 +891,11 @@ class BattleScene(Scene):
                 self.attacking_pokemon = None
                 self.attack_animation_timer = 0.0
                 self._ensure_monster_sprites()
+                # Reload animation frames for the new enemy monster
+                self.enemy_idle_frames = self._get_all_frames_from_sheet(self.enemy_mon, "idle")
+                self.enemy_attack_frames = self._get_all_frames_from_sheet(self.enemy_mon, "attack")
+                if self.enemy_idle_frames:
+                    self.enemy_idle_sprite = self.enemy_idle_frames[0]
                 self.enqueue_message(f"Enemy sent out {self.enemy_mon['name']}!")
                 self.turn = "player"
                 self._time_since_action = 0.0
@@ -968,6 +1085,12 @@ class BattleScene(Scene):
                 self.enemy_entrance_done = True
             return  # Skip other updates during entrance animation
         
+        # Update idle animation timer (cycle through frames)
+        self.idle_animation_timer += dt
+        if self.idle_animation_timer >= self.idle_animation_speed:
+            self.idle_animation_timer = 0.0
+            self.idle_frame_index = (self.idle_frame_index + 1) % 4
+        
         # Update evolution display timer
         if self.evolution_display_timer > 0:
             self.evolution_display_timer -= dt
@@ -1128,10 +1251,11 @@ class BattleScene(Scene):
                 grow_progress = (entrance_progress - 0.5) / 0.5
                 scale = grow_progress  # 0.0 to 1.0
                 
-                # Draw player Pokemon growing
-                if self.player_mon.get("sprite") is not None:
+                # Draw player Pokemon growing (use first idle frame if available)
+                player_entrance_sprite = self.player_idle_frames[0] if self.player_idle_frames else self.player_mon.get("sprite")
+                if player_entrance_sprite is not None:
                     try:
-                        s = self.player_mon["sprite"]
+                        s = player_entrance_sprite
                         original_w, original_h = s.get_width(), s.get_height()
                         new_w = int(original_w * scale)
                         new_h = int(original_h * scale)
@@ -1144,10 +1268,11 @@ class BattleScene(Scene):
                     except:
                         pass
                 
-                # Draw enemy Pokemon growing
-                if self.enemy_mon.get("sprite") is not None:
+                # Draw enemy Pokemon growing (use first idle frame if available)
+                enemy_entrance_sprite = self.enemy_idle_frames[0] if self.enemy_idle_frames else self.enemy_mon.get("sprite")
+                if enemy_entrance_sprite is not None:
                     try:
-                        s = self.enemy_mon["sprite"]
+                        s = enemy_entrance_sprite
                         original_w, original_h = s.get_width(), s.get_height()
                         new_w = int(original_w * scale)
                         new_h = int(original_h * scale)
@@ -1168,12 +1293,13 @@ class BattleScene(Scene):
             
             return  # Don't draw normal battle UI during entrance
 
-        # Draw enemy sprite (if available)
+        # Draw enemy sprite (if available) with animation
         # Don't draw if Pokemon was successfully captured
         if not self.pokemon_captured:
-            if self.enemy_mon.get("sprite") is not None:
+            enemy_sprite = self._get_current_enemy_sprite()
+            if enemy_sprite is not None:
                 try:
-                    s = self.enemy_mon["sprite"]
+                    s = enemy_sprite
                     # If capture animation is active, shrink the sprite
                     if self.capture_animation and self.original_enemy_sprite:
                         progress = self.capture_timer / self.capture_duration
@@ -1201,10 +1327,11 @@ class BattleScene(Scene):
                     name_surf = self.font_med.render(self.enemy_mon.get("name", "Enemy"), True, (255, 255, 255))
                     screen.blit(name_surf, (self.enemy_pos[0], self.enemy_pos[1] - 24))
 
-        # Draw player sprite
-        if self.player_mon.get("sprite") is not None:
+        # Draw player sprite with animation
+        player_sprite = self._get_current_player_sprite()
+        if player_sprite is not None:
             try:
-                s = self.player_mon["sprite"]
+                s = player_sprite
                 screen.blit(s, self.player_pos)
             except Exception:
                 pass
@@ -1224,7 +1351,7 @@ class BattleScene(Scene):
         # Draw Pokemon ball indicators for enemy team (below enemy banner)
         if len(self.enemy_team) > 1:
             ball_x = enemy_banner_x
-            ball_y = 85  # Below the banner
+            ball_y = 105  # Below the banner (banner ends at y=100)
             ball_spacing = 28
             for i, mon in enumerate(self.enemy_team):
                 # Draw ball sprite if alive, gray version if fainted

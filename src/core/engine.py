@@ -49,6 +49,8 @@ class Engine:
             if event.type == pg.QUIT:
                 self.running = False
             input_manager.handle_events(event)
+            # Forward events to current scene
+            scene_manager.handle_event(event)
 
     def update(self, dt: float):
         scene_manager.update(dt)

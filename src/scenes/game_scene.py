@@ -19,6 +19,7 @@ import random
 from src.scenes.catch_scene import CatchMonsterScene
 from src.core.services import scene_manager
 from src.utils.encounters import generate_random_monster
+from src.entities.pokemon_follower import PokemonFollower
 
 class GameScene(Scene):
     game_manager: GameManager
@@ -47,6 +48,14 @@ class GameScene(Scene):
 
         self.sprite_online = Sprite("ingame_ui/options1.png", (GameSettings.TILE_SIZE, GameSettings.TILE_SIZE))
         self.online_animations = {}
+        
+        # Online player indicator icon (shown above player's head when others are connected)
+        self.online_indicator_icon = None
+        try:
+            self.online_indicator_icon = pg.image.load("assets/images/UI/raw/UI_Flat_IconPoint01a.png").convert_alpha()
+            self.online_indicator_icon = pg.transform.scale(self.online_indicator_icon, (24, 24))
+        except Exception as e:
+            Logger.warning(f"Failed to load online indicator icon: {e}")
         
         # --- Chat system ---
         self._chat_bubbles: Dict[int, Tuple[str, float]] = {}
@@ -292,6 +301,10 @@ class GameScene(Scene):
         self.backpack_scroll_y = 0
         self.backpack_scroll_speed = 20
 
+        # --- Pokemon Follower ---
+        self.pokemon_follower = None  # Will be set when player selects a monster to follow
+        self._follow_button_rects = {}  # Initialize follow button rects
+
     def _open_overlay(self):
         self.overlay_open = True
 
@@ -304,6 +317,26 @@ class GameScene(Scene):
 
     def _close_backpack(self):
         self.backpack_open = False
+    
+    def _set_pokemon_follower(self, monster_index: int):
+        """Set a Pokemon from the bag to follow the player."""
+        if monster_index < 0 or monster_index >= len(self.game_manager.bag.monsters):
+            return
+        
+        monster = self.game_manager.bag.monsters[monster_index]
+        if self.game_manager.player:
+            player_pos = self.game_manager.player.position
+            if self.pokemon_follower is None:
+                self.pokemon_follower = PokemonFollower(monster, player_pos)
+            else:
+                self.pokemon_follower.set_monster(monster, player_pos)
+            Logger.info(f"Pokemon {monster.get('name', 'Unknown')} is now following the player!")
+        self._close_backpack()
+    
+    def _remove_pokemon_follower(self):
+        """Remove the currently following Pokemon."""
+        self.pokemon_follower = None
+        Logger.info("Pokemon follower removed.")
     
     def _open_navigation(self):
         """Open the navigation overlay."""
@@ -409,6 +442,10 @@ class GameScene(Scene):
         for shopkeeper in self.game_manager.current_map.shopkeepers:
             shopkeeper.animation.update_pos(shopkeeper.position)
         self.game_manager.bag.update(dt)
+        
+        # Update Pokemon follower
+        if self.pokemon_follower and self.game_manager.player:
+            self.pokemon_follower.update(dt, self.game_manager.player.position)
         
         # Update falling leaves
         self._update_leaves(dt)
@@ -632,26 +669,57 @@ class GameScene(Scene):
             return
         
         if event.type == pg.MOUSEBUTTONDOWN:
-            # Forward event to buttons
+            # Forward event to buttons using handle_event
             if not self.overlay_open:
-                self.settings_button.update(0)  # triggers click
+                self.settings_button.handle_event(event)  # triggers click
             else:
-                self.back_button.update(0)      # triggers click
+                self.back_button.handle_event(event)      # triggers click
 
             if self.overlay_open:
-                self.checkbox_sound.handle_event(event)
-                self.slider_music.handle_event(event)
-                self.save_button.update(0)  # trigger click
-                self.load_button.update(0)
+                self.checkbox_sound.update(0)  # Checkbox uses update(), not handle_event
+                self.slider_music.update(0)    # Slider uses update(), not handle_event
+                self.save_button.handle_event(event)  # trigger click
+                self.load_button.handle_event(event)
 
             if not self.overlay_open and not self.backpack_open:
-                self.backpack_button.update(0)
-                self.navigation_button.update(0)
+                self.backpack_button.handle_event(event)
+                self.navigation_button.handle_event(event)
 
             if self.backpack_open:
-                self.backpack_close_button.update(0)
-                self.backpack_monsters_button.update(0)
-                self.backpack_items_button.update(0)
+                self.backpack_close_button.handle_event(event)
+                self.backpack_monsters_button.handle_event(event)
+                self.backpack_items_button.handle_event(event)
+                
+                # Handle Follow button clicks in monsters tab (on actual mouse click)
+                if self.backpack_tab == "monsters" and event.button == 1:
+                    mx, my = pg.mouse.get_pos()
+                    # Calculate button positions directly (same logic as in draw)
+                    start_y = self.backpack_box_rect.y + 110
+                    monster_block_w, monster_block_h = 260, 50
+                    padding_x, padding_y = 10, 5
+                    columns = 2
+                    follow_btn_w, follow_btn_h = 50, 30
+                    
+                    for index, mon in enumerate(self.game_manager.bag.monsters):
+                        col = index % columns
+                        row = index // columns
+                        block_x = self.backpack_box_rect.x + 20 + col * (monster_block_w + padding_x)
+                        block_y = start_y + row * (monster_block_h + padding_y) - self.backpack_scroll_y
+                        
+                        # Only check if inside overlay box
+                        if block_y + monster_block_h < self.backpack_box_rect.y + self.backpack_box_rect.height - 10 and block_y > self.backpack_box_rect.y + 100:
+                            follow_btn_x = block_x + monster_block_w - follow_btn_w - 8
+                            follow_btn_y = block_y + (monster_block_h - follow_btn_h) // 2
+                            follow_btn_rect = pg.Rect(follow_btn_x, follow_btn_y, follow_btn_w, follow_btn_h)
+                            
+                            if follow_btn_rect.collidepoint(mx, my):
+                                is_following = (self.pokemon_follower is not None and 
+                                               self.pokemon_follower.monster.get("name") == mon.get("name"))
+                                if is_following:
+                                    self._remove_pokemon_follower()
+                                else:
+                                    self._set_pokemon_follower(index)
+                                break
 
             if self.backpack_open:
                 if event.type == pg.MOUSEBUTTONDOWN:
@@ -708,12 +776,18 @@ class GameScene(Scene):
         """Draw the monsters tab content."""
         monster_font = pg.font.Font("assets/fonts/Minecraft.ttf", 16)
         hp_font = pg.font.Font("assets/fonts/Minecraft.ttf", 14)
+        follow_font = pg.font.Font("assets/fonts/Minecraft.ttf", 12)
 
         start_y = self.backpack_box_rect.y + 110  # starting y inside box below tabs
-        monster_block_w, monster_block_h = 200, 50
+        monster_block_w, monster_block_h = 260, 50  # Wider to fit Follow button
         monster_sprite_size = 45
         padding_x, padding_y = 10, 5
         columns = 2  # number of monsters per row
+        
+        # Store follow button rects for click detection
+        if not hasattr(self, '_follow_button_rects'):
+            self._follow_button_rects = {}
+        self._follow_button_rects.clear()
 
         for index, mon in enumerate(self.game_manager.bag.monsters):
             col = index % columns
@@ -723,7 +797,7 @@ class GameScene(Scene):
             block_y = start_y + row * (monster_block_h + padding_y) - self.backpack_scroll_y
 
             # Only draw if inside overlay box
-            if block_y + monster_block_h < self.backpack_box_rect.y + self.backpack_box_rect.height - 10:
+            if block_y + monster_block_h < self.backpack_box_rect.y + self.backpack_box_rect.height - 10 and block_y > self.backpack_box_rect.y + 100:
                 block_rect = pg.Rect(block_x, block_y, monster_block_w, monster_block_h)
                 
                 # Draw banner as background
@@ -749,13 +823,45 @@ class GameScene(Scene):
 
                 # HP bar - positioned below the name/level
                 hp, max_hp = mon["hp"], mon["max_hp"]
-                bar_w, bar_h = 65, 5
-                bar_x, bar_y = block_x + 130, block_y + 16
+                bar_w, bar_h = 50, 5
+                bar_x, bar_y = block_x + 58, block_y + 38
                 pg.draw.rect(screen, (0,0,0), (bar_x, bar_y, bar_w, bar_h), 1)
                 hp_ratio = hp / max_hp
                 fill_w = int((bar_w - 2) * hp_ratio)
                 fill_color = (50,205,50) if hp_ratio > 0.5 else (255,215,0) if hp_ratio > 0.2 else (255,0,0)
                 pg.draw.rect(screen, fill_color, (bar_x+1, bar_y+1, fill_w, bar_h-2))
+                
+                # Follow button - on the right side of the block
+                follow_btn_w, follow_btn_h = 50, 30
+                follow_btn_x = block_x + monster_block_w - follow_btn_w - 8
+                follow_btn_y = block_y + (monster_block_h - follow_btn_h) // 2
+                follow_btn_rect = pg.Rect(follow_btn_x, follow_btn_y, follow_btn_w, follow_btn_h)
+                
+                # Check if this monster is currently following
+                is_following = (self.pokemon_follower is not None and 
+                               self.pokemon_follower.monster.get("name") == mon.get("name"))
+                
+                # Button hover detection
+                mx, my = pg.mouse.get_pos()
+                is_hovered = follow_btn_rect.collidepoint(mx, my)
+                
+                # Draw button
+                if is_following:
+                    btn_color = (100, 200, 100) if not is_hovered else (120, 220, 120)
+                    btn_text = "Stop"
+                else:
+                    btn_color = (200, 150, 50) if not is_hovered else (220, 170, 70)
+                    btn_text = "Follow"
+                
+                pg.draw.rect(screen, btn_color, follow_btn_rect)
+                pg.draw.rect(screen, (100, 80, 40), follow_btn_rect, 2)
+                
+                follow_txt = follow_font.render(btn_text, True, (255, 255, 255))
+                follow_txt_rect = follow_txt.get_rect(center=follow_btn_rect.center)
+                screen.blit(follow_txt, follow_txt_rect)
+                
+                # Store button rect for click detection
+                self._follow_button_rects[index] = (follow_btn_rect, is_following)
 
     def _draw_backpack_items(self, screen: pg.Surface) -> None:
         """Draw the items tab content."""
@@ -1084,7 +1190,18 @@ class GameScene(Scene):
             )
             self.game_manager.current_map.draw(screen, camera)
             
+            # Draw Pokemon follower (behind player)
+            if self.pokemon_follower:
+                self.pokemon_follower.draw(screen, camera)
+            
             player.draw(screen, camera)
+            
+            # Draw online indicator icon above player's head if other players are connected
+            if self.online_manager and self.online_indicator_icon and len(self.online_animations) > 0:
+                player_screen_pos = camera.transform_position_as_position(player.position)
+                icon_x = player_screen_pos.x + (GameSettings.TILE_SIZE - 24) // 2  # Center above player
+                icon_y = player_screen_pos.y - 30  # Above player's head
+                screen.blit(self.online_indicator_icon, (icon_x, icon_y))
         else:
             if self.game_manager.current_map:
                 self.game_manager.current_map.draw(screen, camera)
