@@ -37,6 +37,7 @@ class Shopkeeper(Entity):
             {"name": "Super Potion", "price": 10, "count": 5},
             {"name": "Pokéball", "price": 20, "count": 15},
             {"name": "Great Ball", "price": 60, "count": 8},
+            {"name": "Ultra Ball", "price": 120, "count": 5},
         ]
         
         self._set_direction(self.facing)

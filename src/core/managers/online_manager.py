@@ -265,10 +265,7 @@ class OnlineManager:
             except Exception as e:
                 Logger.warning(f"WebSocket send error: {e}")
                 await asyncio.sleep(0.1)
-
-    # -----------------------------
-    # Chat API
-    # -----------------------------
+                
     def send_chat(self, text: str) -> bool:
         if self.player_id == -1:
             return False

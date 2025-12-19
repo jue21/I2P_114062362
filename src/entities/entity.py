@@ -12,6 +12,10 @@ class Entity:
     position: Position
     game_manager: "GameManager"
     
+    # Shadow properties
+    shadow_color: tuple = (0, 0, 0, 80)  # Semi-transparent black
+    shadow_offset_y: int = 2  # Shadow slightly below the character
+    
     def __init__(self, x: float, y: float, game_manager: "GameManager", sprite_path: str = "character/ow1.png") -> None:
         # Sprite is only for debug, need to change into animations
         self.animation = Animation(
@@ -27,8 +31,27 @@ class Entity:
     def update(self, dt: float) -> None:
         self.animation.update_pos(self.position)
         self.animation.update(dt)
+    
+    def draw_shadow(self, screen: pg.Surface, camera: PositionCamera, y_offset: float = 0) -> None:
+        """Draw an elliptical shadow beneath the entity."""
+        # Calculate shadow position (at the feet of the character)
+        shadow_x = self.animation.rect.centerx - camera.x
+        shadow_y = self.animation.rect.bottom - camera.y + self.shadow_offset_y - y_offset
+        
+        # Shadow dimensions (ellipse)
+        shadow_width = int(GameSettings.TILE_SIZE * 0.7)
+        shadow_height = int(GameSettings.TILE_SIZE * 0.25)
+        
+        # Create a surface for the shadow with alpha
+        shadow_surface = pg.Surface((shadow_width, shadow_height), pg.SRCALPHA)
+        pg.draw.ellipse(shadow_surface, self.shadow_color, (0, 0, shadow_width, shadow_height))
+        
+        # Draw shadow centered at position
+        screen.blit(shadow_surface, (shadow_x - shadow_width // 2, shadow_y - shadow_height // 2))
         
     def draw(self, screen: pg.Surface, camera: PositionCamera) -> None:
+        # Draw shadow first (so it appears behind the character)
+        self.draw_shadow(screen, camera)
         self.animation.draw(screen, camera)
         if GameSettings.DRAW_HITBOXES:
             self.animation.draw_hitbox(screen, camera)

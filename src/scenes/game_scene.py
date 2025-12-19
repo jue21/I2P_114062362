@@ -410,8 +410,8 @@ class GameScene(Scene):
             shopkeeper.animation.update_pos(shopkeeper.position)
         self.game_manager.bag.update(dt)
         
-        # Update Christmas snowflakes
-        self._update_snowflakes(dt)
+        # Update falling leaves
+        self._update_leaves(dt)
 
         if self.game_manager.player and self.online_manager:
             # Convert direction enum to string
@@ -913,44 +913,66 @@ class GameScene(Scene):
             screen.blit(white_overlay, (0, 0))
 
     def _init_christmas_decorations(self):
-        """Initialize Christmas decorations - snowflakes"""
-        # Snowflakes list: each is [x, y, speed, size, sway_offset]
-        self.snowflakes = []
-        for _ in range(30):  # 30 snowflakes
-            self.snowflakes.append([
+        """Initialize falling leaves"""
+        # Leaves list: each is [x, y, speed, size, sway_offset, rotation, color_idx]
+        self.leaves = []
+        for _ in range(25):  # 25 leaves
+            self.leaves.append([
                 random.randint(0, GameSettings.SCREEN_WIDTH),  # x
                 random.randint(-50, GameSettings.SCREEN_HEIGHT),  # y
-                random.uniform(30, 80),  # fall speed
-                random.randint(2, 5),  # size
-                random.uniform(0, 6.28)  # sway phase
+                random.uniform(25, 60),  # fall speed (slower than snow)
+                random.randint(4, 8),  # size
+                random.uniform(0, 6.28),  # sway phase
+                random.uniform(0, 360),  # rotation angle
+                random.randint(0, 3)  # color index
             ])
-        self.snowflake_time = 0
+        self.leaf_time = 0
+        # Leaf colors (various greens and autumn colors)
+        self.leaf_colors = [
+            (34, 139, 34),   # Forest green
+            (50, 205, 50),   # Lime green
+            (60, 179, 113),  # Medium sea green
+            (85, 170, 85),   # Light green
+        ]
     
-    def _update_snowflakes(self, dt: float):
-        """Update snowflake positions"""
-        self.snowflake_time += dt
-        for flake in self.snowflakes:
-            # Fall down
-            flake[1] += flake[2] * dt
-            # Sway left/right using sine wave
-            flake[4] += dt * 2
-            flake[0] += 20 * dt * (0.5 + 0.5 * math.sin(flake[4]))
+    def _update_leaves(self, dt: float):
+        """Update falling leaf positions"""
+        self.leaf_time += dt
+        for leaf in self.leaves:
+            # Fall down (slower, more floating)
+            leaf[1] += leaf[2] * dt
+            # Sway left/right using sine wave (more pronounced swaying)
+            leaf[4] += dt * 1.5
+            leaf[0] += 30 * dt * math.sin(leaf[4])
+            # Rotate the leaf
+            leaf[5] += 40 * dt  # Rotation speed
             
             # Reset if off screen
-            if flake[1] > GameSettings.SCREEN_HEIGHT + 10:
-                flake[1] = random.randint(-30, -10)
-                flake[0] = random.randint(0, GameSettings.SCREEN_WIDTH)
+            if leaf[1] > GameSettings.SCREEN_HEIGHT + 10:
+                leaf[1] = random.randint(-30, -10)
+                leaf[0] = random.randint(0, GameSettings.SCREEN_WIDTH)
+                leaf[5] = random.uniform(0, 360)
     
-    def _draw_snowflakes(self, screen: pg.Surface):
-        """Draw falling snowflakes"""
-        for flake in self.snowflakes:
-            # Draw snowflake as white circle with slight glow
-            x, y = int(flake[0]), int(flake[1])
-            size = flake[3]
-            # Outer glow
-            pg.draw.circle(screen, (200, 200, 255, 100), (x, y), size + 1)
-            # Core
-            pg.draw.circle(screen, (255, 255, 255), (x, y), size)
+    def _draw_leaves(self, screen: pg.Surface):
+        """Draw falling leaves"""
+        for leaf in self.leaves:
+            x, y = int(leaf[0]), int(leaf[1])
+            size = leaf[3]
+            rotation = leaf[5]
+            color_idx = leaf[6]
+            color = self.leaf_colors[color_idx]
+            
+            # Create a small leaf shape
+            leaf_surface = pg.Surface((size * 2, size * 2), pg.SRCALPHA)
+            # Draw leaf as an ellipse (oval shape)
+            pg.draw.ellipse(leaf_surface, color, (0, size // 2, size * 2, size))
+            # Add a small stem/vein
+            pg.draw.line(leaf_surface, (30, 80, 30), (size, size // 2), (size, size + size // 2), 1)
+            
+            # Rotate the leaf
+            rotated_leaf = pg.transform.rotate(leaf_surface, rotation)
+            leaf_rect = rotated_leaf.get_rect(center=(x, y))
+            screen.blit(rotated_leaf, leaf_rect)
 
     def _create_minimap(self):
         """Create a mini-map surface for the current map with actual map colors"""
@@ -1038,17 +1060,17 @@ class GameScene(Scene):
             pg.draw.circle(screen, (0, 255, 0), (player_screen_x, player_screen_y), 4)
             pg.draw.circle(screen, (0, 200, 0), (player_screen_x, player_screen_y), 4, 1)
         
-        # Draw snowflakes on minimap
+        # Draw leaves on minimap
         minimap_w = self.minimap_surface.get_width()
         minimap_h = self.minimap_surface.get_height()
-        for flake in self.snowflakes:
-            # Scale snowflake position to minimap
-            flake_x = int(flake[0] / GameSettings.SCREEN_WIDTH * minimap_w) + self.minimap_pos[0]
-            flake_y = int(flake[1] / GameSettings.SCREEN_HEIGHT * minimap_h) + self.minimap_pos[1]
+        for leaf in self.leaves:
+            # Scale leaf position to minimap
+            leaf_x = int(leaf[0] / GameSettings.SCREEN_WIDTH * minimap_w) + self.minimap_pos[0]
+            leaf_y = int(leaf[1] / GameSettings.SCREEN_HEIGHT * minimap_h) + self.minimap_pos[1]
             # Only draw if within minimap bounds
-            if (self.minimap_pos[0] <= flake_x < self.minimap_pos[0] + minimap_w and
-                self.minimap_pos[1] <= flake_y < self.minimap_pos[1] + minimap_h):
-                pg.draw.circle(screen, (255, 255, 255), (flake_x, flake_y), 1)
+            if (self.minimap_pos[0] <= leaf_x < self.minimap_pos[0] + minimap_w and
+                self.minimap_pos[1] <= leaf_y < self.minimap_pos[1] + minimap_h):
+                pg.draw.circle(screen, (50, 180, 50), (leaf_x, leaf_y), 1)
 
     @override
     def draw(self, screen: pg.Surface):
@@ -1126,8 +1148,8 @@ class GameScene(Scene):
         if self.shop_button_visible:
             self.shop_button.draw(screen)
 
-        # --- Draw falling snowflakes ---
-        self._draw_snowflakes(screen)
+        # --- Draw falling leaves ---
+        self._draw_leaves(screen)
 
         # --- Draw mini-map ---
         self._draw_minimap(screen)

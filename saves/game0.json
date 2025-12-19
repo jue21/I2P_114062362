@@ -87,7 +87,7 @@
             {
               "name": "Pokeball",
               "price": 20,
-              "count": 7
+              "count": 3
             },
             {
               "name": "Great Ball",
@@ -97,7 +97,7 @@
             {
               "name": "Ultra Ball",
               "price": 120,
-              "count": 3
+              "count": 10
             }
           ],
           "sprite_path": "character/ow3.png"
@@ -169,8 +169,8 @@
   ],
   "current_map": "map.tmx",
   "player": {
-    "x": 4.128142853498738,
-    "y": 15.0
+    "x": 7.0,
+    "y": 11.0
   },
   "bag": {
     "monsters": [
@@ -336,7 +336,7 @@
       },
       {
         "name": "Coins",
-        "count": 3335,
+        "count": 2295,
         "sprite_path": "ingame_ui/coin.png",
         "item_type": null
       },
@@ -348,13 +348,13 @@
       },
       {
         "name": "Ultra Ball",
-        "count": 1,
+        "count": 9,
         "sprite_path": "ingame_ui/ball.png",
         "item_type": "pokeball"
       },
       {
         "name": "Pokeball",
-        "count": 1,
+        "count": 5,
         "sprite_path": ""
       }
     ]

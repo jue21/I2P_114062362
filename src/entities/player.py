@@ -12,9 +12,19 @@ class Player(Entity):
     sprint_multiplier: float = 2.0  # Sprint speed multiplier
     game_manager: GameManager
     is_moving: bool = False
+    
+    # Jump properties
+    is_jumping: bool = False
+    jump_height: float = 20.0  # Max height of jump in pixels
+    jump_duration: float = 0.4  # Total jump duration in seconds
+    jump_timer: float = 0.0
+    jump_offset: float = 0.0  # Current vertical offset for jump animation
 
     def __init__(self, x: float, y: float, game_manager: GameManager) -> None:
         super().__init__(x, y, game_manager)
+        self.is_jumping = False
+        self.jump_timer = 0.0
+        self.jump_offset = 0.0
 
     def get_rect(self) -> pg.Rect:
         return pg.Rect(self.position.x, self.position.y, GameSettings.TILE_SIZE, GameSettings.TILE_SIZE)
@@ -42,6 +52,23 @@ class Player(Entity):
             self._set_direction("down")
         elif dis.y < 0:
             self._set_direction("up")
+
+        # --- Check for jump ---
+        if input_manager.key_pressed(pg.K_j) and not self.is_jumping:
+            self.is_jumping = True
+            self.jump_timer = 0.0
+        
+        # --- Update jump animation ---
+        if self.is_jumping:
+            self.jump_timer += dt
+            if self.jump_timer >= self.jump_duration:
+                self.is_jumping = False
+                self.jump_timer = 0.0
+                self.jump_offset = 0.0
+            else:
+                # Use sine curve for smooth jump arc
+                progress = self.jump_timer / self.jump_duration
+                self.jump_offset = -math.sin(progress * math.pi) * self.jump_height
 
         # --- Check for sprint ---
         current_speed = self.speed
@@ -109,7 +136,19 @@ class Player(Entity):
 
     @override
     def draw(self, screen: pg.Surface, camera: PositionCamera) -> None:
-        super().draw(screen, camera)
+        # Apply jump offset to draw position
+        if self.is_jumping and self.jump_offset != 0:
+            # Draw shadow at ground level (not affected by jump)
+            self.draw_shadow(screen, camera, y_offset=0)
+            # Create a temporary position with jump offset for drawing character
+            original_rect_y = self.animation.rect.y
+            self.animation.rect.y += int(self.jump_offset)
+            self.animation.draw(screen, camera)
+            if GameSettings.DRAW_HITBOXES:
+                self.animation.draw_hitbox(screen, camera)
+            self.animation.rect.y = original_rect_y
+        else:
+            super().draw(screen, camera)
     
     def _set_direction(self, direction: str) -> None:
         """Update direction and switch animation based on direction string."""

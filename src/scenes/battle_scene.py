@@ -179,6 +179,14 @@ class BattleScene(Scene):
         except Exception:
             pass  # If ball sprite fails to load, we'll fall back to circles
 
+        # Load banner image for Pokemon info display
+        self.pokemon_banner = None
+        try:
+            banner_path = str(Path("assets") / "images" / "UI" / "raw" / "UI_Flat_Banner04a.png")
+            self.pokemon_banner = pg.image.load(banner_path).convert_alpha()
+        except Exception:
+            pass  # If banner fails to load, we'll use rectangles as fallback
+
         # Fonts
         try:
             self.font_big = pg.font.Font("assets/fonts/Minecraft.ttf", 28)
@@ -434,6 +442,80 @@ class BattleScene(Scene):
                 # Sprite exists and is valid, just wrong size - scale it
                 self.enemy_mon["sprite"] = pg.transform.scale(sprite, (300, 300))
 
+    def _draw_pokemon_info_banner(self, screen: pg.Surface, pokemon: dict, x: int, y: int, is_player: bool = True) -> None:
+        """Draw a Pokemon info banner with name, element, and HP bar."""
+        banner_width = 260
+        banner_height = 90
+        
+        # Draw banner background
+        if self.pokemon_banner:
+            banner_scaled = pg.transform.scale(self.pokemon_banner, (banner_width, banner_height))
+            screen.blit(banner_scaled, (x, y))
+        else:
+            # Fallback to colored rectangle
+            banner_rect = pg.Rect(x, y, banner_width, banner_height)
+            pg.draw.rect(screen, (60, 60, 80), banner_rect)
+            pg.draw.rect(screen, (200, 200, 200), banner_rect, 2)
+        
+        # Pokemon name and level (black text)
+        name = pokemon.get("name", "Unknown")
+        level = pokemon.get("level", 1)
+        name_text = self.font_med.render(f"{name}", True, (0, 0, 0))
+        level_text = self.font_med.render(f"Lv.{level}", True, (0, 0, 0))
+        screen.blit(name_text, (x + 25, y + 15))
+        screen.blit(level_text, (x + banner_width - 65, y + 15))
+        
+        # Element type
+        element = pokemon.get("element", "Normal")
+        # Get element color
+        element_colors = {
+            "Fire": (200, 60, 30),
+            "Water": (30, 100, 200),
+            "Grass": (60, 150, 50),
+            "Electric": (200, 170, 0),
+            "Ice": (100, 180, 220),
+            "Fighting": (150, 50, 40),
+            "Poison": (130, 50, 150),
+            "Ground": (160, 120, 60),
+            "Flying": (100, 140, 220),
+            "Psychic": (220, 70, 120),
+            "Bug": (140, 160, 30),
+            "Rock": (150, 130, 80),
+            "Ghost": (80, 60, 130),
+            "Dragon": (100, 60, 180),
+            "Dark": (80, 60, 50),
+            "Steel": (150, 150, 170),
+            "Fairy": (220, 120, 170),
+            "Normal": (140, 140, 140),
+        }
+        element_color = element_colors.get(element, (140, 140, 140))
+        element_text = self.font_med.render(f"{element}", True, element_color)
+        screen.blit(element_text, (x + 25, y + 40))
+        
+        # HP bar
+        hp = pokemon.get("hp", 0)
+        max_hp = pokemon.get("max_hp", 1)
+        hp_ratio = hp / max_hp if max_hp > 0 else 0
+        
+        bar_x = x + 23
+        bar_y = y + 62
+        bar_width = banner_width - 100
+        bar_height = 8
+        
+        # HP bar background
+        pg.draw.rect(screen, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height))
+        pg.draw.rect(screen, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height), 1)
+        
+        # HP bar fill
+        fill_color = (50, 205, 50) if hp_ratio > 0.5 else (255, 215, 0) if hp_ratio > 0.2 else (255, 50, 50)
+        fill_width = int((bar_width - 2) * hp_ratio)
+        if fill_width > 0:
+            pg.draw.rect(screen, fill_color, (bar_x + 1, bar_y + 1, fill_width, bar_height - 2))
+        
+        # HP text (inside banner)
+        hp_text = self.font_med.render(f"{hp}/{max_hp}", True, (0, 0, 0))
+        screen.blit(hp_text, (bar_x + bar_width + 8, bar_y - 3))
+
     # menu actions
     def open_fight(self):
         if self.turn != "player": 
@@ -496,27 +578,87 @@ class BattleScene(Scene):
             self.enqueue_message("Only one monster available!")
             return
 
-    # Otherwise, show buttons
+    # Otherwise, show buttons with scrolling support
         self.submenu = "monsters"
         self._time_since_action = 0.0
         self.monster_buttons = []
         sw, sh = GameSettings.SCREEN_WIDTH, GameSettings.SCREEN_HEIGHT
-        menu_x = 40
-        menu_y = sh - 170
-        gap = 46
-
-        for i, mon in enumerate(party):
-            y = menu_y + i * gap
-            name = mon.get("name", f"Mon{i}")
-            hp = mon.get("hp", 0)
-            max_hp = mon.get("max_hp", 30)
-            text = f"{name} HP: {hp}/{max_hp}"
-            self.monster_buttons.append(
-                TextButton(menu_x, y, 360, 40, text, on_click=(lambda i=i: self.switch_monster(i)))
-            )
+        self._monster_menu_x = 40
+        self._monster_menu_y = sh - 175  # Moved down to stay within box
+        self._monster_gap = 38
+        
+        # Maximum visible monsters (show 4 at a time)
+        self._max_visible_monsters = 4
+        self._monster_scroll_offset = 0
+        
+        self._update_monster_buttons(party)
 
     # Store party in scene so switch_monster knows
         self.current_party = party
+
+    def _update_monster_buttons(self, party):
+        """Update monster buttons based on current scroll offset."""
+        self.monster_buttons = []
+        
+        # Calculate visible range
+        start_idx = self._monster_scroll_offset
+        end_idx = min(start_idx + self._max_visible_monsters, len(party))
+        
+        menu_x = self._monster_menu_x
+        menu_y = self._monster_menu_y
+        gap = self._monster_gap
+        monster_btn_width = 320
+        
+        # Side buttons (scroll up, scroll down, back) - positioned beside the 4 monster blocks
+        side_btn_width = 60
+        side_btn_height = 50
+        side_btn_x = menu_x + monster_btn_width + 10
+        side_btn_gap = 55
+        
+        # Use larger font for side button symbols
+        large_font = pg.font.Font(None, 36)
+        
+        # Add scroll up button (top of side panel)
+        if self._monster_scroll_offset > 0:
+            self.monster_buttons.append(
+                TextButton(side_btn_x, menu_y, side_btn_width, side_btn_height, "UP", on_click=lambda: self._scroll_monsters(-1, party), font=large_font)
+            )
+        
+        # Add scroll down button (middle of side panel)
+        if end_idx < len(party):
+            self.monster_buttons.append(
+                TextButton(side_btn_x, menu_y + side_btn_gap, side_btn_width, side_btn_height, "DN", on_click=lambda: self._scroll_monsters(1, party), font=large_font)
+            )
+        
+        # Add back button (bottom of side panel)
+        self.monster_buttons.append(
+            TextButton(side_btn_x, menu_y + side_btn_gap * 2, side_btn_width, side_btn_height, "Back", on_click=self._close_monster_menu, font=large_font)
+        )
+        
+        for display_idx, i in enumerate(range(start_idx, end_idx)):
+            mon = party[i]
+            y = menu_y + display_idx * gap
+            name = mon.get("name", f"Mon{i}")
+            hp = mon.get("hp", 0)
+            max_hp = mon.get("max_hp", 30)
+            # Mark currently active monster with a star
+            active_marker = " *" if mon is self.player_mon else ""
+            text = f"{name} HP: {hp}/{max_hp}{active_marker}"
+            self.monster_buttons.append(
+                TextButton(menu_x, y, monster_btn_width, 36, text, on_click=(lambda i=i: self.switch_monster(i)))
+            )
+
+    def _scroll_monsters(self, direction, party):
+        """Scroll the monster list up or down."""
+        new_offset = self._monster_scroll_offset + direction
+        max_offset = max(0, len(party) - self._max_visible_monsters)
+        self._monster_scroll_offset = max(0, min(new_offset, max_offset))
+        self._update_monster_buttons(party)
+
+    def _close_monster_menu(self):
+        """Close the monster menu and return to main."""
+        self.submenu = "main"
+        self.monster_buttons = []
 
     def switch_monster(self, idx: int):
         # Use the same party retrieval logic as open_monsters
@@ -1071,16 +1213,18 @@ class BattleScene(Scene):
             name_surf = self.font_med.render(self.player_mon.get("name", "Player"), True, (255, 255, 255))
             screen.blit(name_surf, (self.player_pos[0], self.player_pos[1] - 24))
 
-        # Draw HP texts
-        ph = f"{self.player_mon.get('name','Player')} HP: {self.player_mon.get('hp',0)}/{self.player_mon.get('max_hp',0)}"
-        eh = f"{self.enemy_mon.get('name','Enemy')} HP: {self.enemy_mon.get('hp',0)}/{self.enemy_mon.get('max_hp',0)}"
-        screen.blit(self.font_med.render(eh, True, (255, 255, 255)), (420, 40))
-        screen.blit(self.font_med.render(ph, True, (255, 255, 255)), (40, 40))
+        # Draw Pokemon info banners with name, element, and HP bar
+        # Player Pokemon banner (bottom-left, near the player sprite)
+        self._draw_pokemon_info_banner(screen, self.player_mon, 20, 10, is_player=True)
         
-        # Draw Pokemon ball indicators for enemy team
+        # Enemy Pokemon banner (top-right, near the enemy sprite)
+        enemy_banner_x = GameSettings.SCREEN_WIDTH - 270
+        self._draw_pokemon_info_banner(screen, self.enemy_mon, enemy_banner_x, 10, is_player=False)
+        
+        # Draw Pokemon ball indicators for enemy team (below enemy banner)
         if len(self.enemy_team) > 1:
-            ball_x = 420
-            ball_y = 90
+            ball_x = enemy_banner_x
+            ball_y = 85  # Below the banner
             ball_spacing = 28
             for i, mon in enumerate(self.enemy_team):
                 # Draw ball sprite if alive, gray version if fainted
@@ -1098,14 +1242,6 @@ class BattleScene(Scene):
                         # Fallback to circles
                         pg.draw.circle(screen, (100, 100, 100), (ball_x + i * ball_spacing + 12, ball_y + 12), 10)
                         pg.draw.circle(screen, (200, 200, 200), (ball_x + i * ball_spacing + 12, ball_y + 12), 10, 2)
-
-        # Draw element type below HP
-        player_element = self.player_mon.get("element", "Normal")
-        enemy_element = self.enemy_mon.get("element", "Normal")
-        player_element_surf = self.font_med.render(f"Type: {player_element}", True, (200, 200, 200))
-        enemy_element_surf = self.font_med.render(f"Type: {enemy_element}", True, (200, 200, 200))
-        screen.blit(enemy_element_surf, (420, 70))
-        screen.blit(player_element_surf, (40, 70))
 
         # Draw bottom command area (text-menu like Gen1)
         box = pg.Rect(0, GameSettings.SCREEN_HEIGHT - 180, GameSettings.SCREEN_WIDTH, 180)

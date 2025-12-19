@@ -9,7 +9,7 @@ MonsterInfoType = UIComponent
 ItemInfoType = UIComponent
 
 class Checkbox:
-    def __init__(self, x, y, size=20, checked=False, label="", font=None):
+    def __init__(self, x, y, size=40, checked=False, label="", font=None):
         self.rect = pg.Rect(x, y, size, size)
         self.checked = checked
         self.label = label
@@ -17,6 +17,19 @@ class Checkbox:
         self.font = font or pg.font.Font(font_path, 24)
         self.hovered = False
         self.clicked = False
+        
+        # Load toggle images
+        self.toggle_on_img = None
+        self.toggle_off_img = None
+        try:
+            self.toggle_on_img = pg.image.load("assets/images/UI/raw/UI_Flat_ToggleOn01a.png").convert_alpha()
+            self.toggle_on_img = pg.transform.scale(self.toggle_on_img, (size , size))
+            self.toggle_off_img = pg.image.load("assets/images/UI/raw/UI_Flat_ToggleOff01a.png").convert_alpha()
+            self.toggle_off_img = pg.transform.scale(self.toggle_off_img, (size , size))
+            # Update rect width to match image
+            self.rect.width = size * 2
+        except Exception:
+            pass  # Fall back to drawing if images fail to load
 
     def update(self, dt: float) -> None:
         mouse_pos = pg.mouse.get_pos()
@@ -31,32 +44,34 @@ class Checkbox:
             self.clicked = False
 
     def draw(self, surface: pg.Surface) -> None:
-        # --- Pokémon-style colors ---
-        base_color = (255, 165, 0)  # orange fill
-        border_color = (0, 0, 0)    # black border
-        check_color = (0, 200, 0)   # dark green for check
-        hover_color = (255, 200, 100)  # highlight when hovered
+        # Use toggle images if available
+        if self.toggle_on_img and self.toggle_off_img:
+            if self.checked:
+                # Mute ON - no music playing (show OFF toggle visually)
+                surface.blit(self.toggle_off_img, self.rect.topleft)
+            else:
+                # Mute OFF - music playing (show ON toggle visually)
+                surface.blit(self.toggle_on_img, self.rect.topleft)
+        else:
+            # Fallback to drawing if images not loaded
+            base_color = (255, 165, 0)
+            border_color = (0, 0, 0)
+            check_color = (0, 200, 0)
+            hover_color = (255, 200, 100)
 
-        # Draw filled box
-        pg.draw.rect(surface, base_color, self.rect)
+            pg.draw.rect(surface, base_color, self.rect)
+            pg.draw.rect(surface, border_color, self.rect, 2)
+            pg.draw.line(surface, hover_color, self.rect.topleft, (self.rect.right - 1, self.rect.top))
+            pg.draw.line(surface, hover_color, self.rect.topleft, (self.rect.left, self.rect.bottom - 1))
 
-        # Draw border
-        pg.draw.rect(surface, border_color, self.rect, 2)
-
-        # Draw highlight inside (top-left) like pixel-art style
-        pg.draw.line(surface, hover_color, self.rect.topleft, (self.rect.right - 1, self.rect.top))
-        pg.draw.line(surface, hover_color, self.rect.topleft, (self.rect.left, self.rect.bottom - 1))
-
-        # Draw check mark
-        if not self.checked:
-            # Simple pixel-art style X
-            pg.draw.line(surface, check_color, self.rect.topleft, self.rect.bottomright, 3)
-            pg.draw.line(surface, check_color, self.rect.topright, self.rect.bottomleft, 3)
+            if not self.checked:
+                pg.draw.line(surface, check_color, self.rect.topleft, self.rect.bottomright, 3)
+                pg.draw.line(surface, check_color, self.rect.topright, self.rect.bottomleft, 3)
 
         # Draw label
         if self.label:
             label_surf = self.font.render(self.label, True, (20, 20, 20))
-            surface.blit(label_surf, (self.rect.right + 6, self.rect.top))
+            surface.blit(label_surf, (self.rect.right + 6, self.rect.centery - label_surf.get_height() // 2))
 
 
 class Slider:

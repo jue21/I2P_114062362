@@ -358,11 +358,9 @@ class ShopOverlay:
         
         # Deduct from shopkeeper's inventory
         item["count"] -= quantity
-        if item["count"] == 0:
-            # Remove item from shop if count reaches 0
-            self.shopkeeper.shop_items.remove(item)
-            # Need to recreate buttons since items list changed
-            self._create_buy_buttons()
+        if item["count"] <= 0:
+            # Restock item when count reaches 0
+            item["count"] = 10
         
         # Deduct coins
         coin_item["count"] -= total_cost
