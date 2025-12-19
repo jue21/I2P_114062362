@@ -127,14 +127,22 @@ class BattleScene(Scene):
         self.game_manager = game_manager  # Store game_manager for saving
         background: BackgroundSprite
 
+        # Handle enemy team (list of monsters) or single monster
+        if isinstance(enemy, list):
+            self.enemy_team = enemy
+            self.enemy_mon_index = 0
+            self.enemy_mon = self.enemy_team[0]
+        else:
+            self.enemy_mon = enemy if isinstance(enemy, dict) else (get_active_monster_from_player(enemy) or {"name": "Wild", "hp": 30, "max_hp": 30, "sprite": None})
+            self.enemy_team = [self.enemy_mon]
+            self.enemy_mon_index = 0
+        
         # Active monster dict views (read/write to these dicts)
         # Use provided player_mon if available, otherwise try to find from player object
         if player_mon is not None:
             self.player_mon = player_mon
         else:
             self.player_mon = get_active_monster_from_player(player) or {"name": "PlayerMon", "hp": 30, "max_hp": 30, "sprite": None}
-        
-        self.enemy_mon = enemy if isinstance(enemy, dict) else (get_active_monster_from_player(enemy) or {"name": "Wild", "hp": 30, "max_hp": 30, "sprite": None})
 
         # Ensure sprites are loaded and sized
         self._ensure_monster_sprites()
@@ -152,6 +160,24 @@ class BattleScene(Scene):
             self.ui_frame = pg.transform.scale(self.ui_frame, (GameSettings.SCREEN_WIDTH, 180))
         except Exception:
             pass  # If frame fails to load, we'll fall back to colored rectangles
+        
+        # Load Pokemon ball sprite for team indicators
+        self.ball_sprite = None
+        self.ball_sprite_gray = None
+        try:
+            ball_path = str(Path("assets") / "images" / "ingame_ui" / "ball.png")
+            original = pg.image.load(ball_path).convert_alpha()
+            self.ball_sprite = pg.transform.scale(original, (24, 24))
+            # Create grayscale version for fainted Pokemon
+            gray_surf = pg.Surface((24, 24), pg.SRCALPHA)
+            for x in range(24):
+                for y in range(24):
+                    r, g, b, a = self.ball_sprite.get_at((x, y))
+                    gray_value = int(0.299 * r + 0.587 * g + 0.114 * b)
+                    gray_surf.set_at((x, y), (gray_value, gray_value, gray_value, a))
+            self.ball_sprite_gray = gray_surf
+        except Exception:
+            pass  # If ball sprite fails to load, we'll fall back to circles
 
         # Fonts
         try:
@@ -576,7 +602,24 @@ class BattleScene(Scene):
                 # Reload sprite for evolved form
                 self.player_mon["sprite"] = None
                 self._ensure_monster_sprites()
-            self._after_battle_end(victory=True)
+            
+            # Check if enemy has more monsters
+            self.enemy_mon_index += 1
+            if self.enemy_mon_index < len(self.enemy_team):
+                # Switch to next enemy monster
+                self.enemy_mon = self.enemy_team[self.enemy_mon_index]
+                self.enemy_moves = safe_get_moves(self.enemy_mon)
+                # Reset enemy sprite state
+                self.enemy_idle_sprite = None
+                self.attacking_pokemon = None
+                self.attack_animation_timer = 0.0
+                self._ensure_monster_sprites()
+                self.enqueue_message(f"Enemy sent out {self.enemy_mon['name']}!")
+                self.turn = "player"
+                self._time_since_action = 0.0
+            else:
+                # All enemy monsters defeated
+                self._after_battle_end(victory=True)
 
     def enemy_use_move(self):
         move = random.choice(self.enemy_moves) if self.enemy_moves else {"name": "Scratch", "power": 6}
@@ -844,6 +887,28 @@ class BattleScene(Scene):
         eh = f"{self.enemy_mon.get('name','Enemy')} HP: {self.enemy_mon.get('hp',0)}/{self.enemy_mon.get('max_hp',0)}"
         screen.blit(self.font_med.render(eh, True, (255, 255, 255)), (420, 40))
         screen.blit(self.font_med.render(ph, True, (255, 255, 255)), (40, 40))
+        
+        # Draw Pokemon ball indicators for enemy team
+        if len(self.enemy_team) > 1:
+            ball_x = 420
+            ball_y = 90
+            ball_spacing = 28
+            for i, mon in enumerate(self.enemy_team):
+                # Draw ball sprite if alive, gray version if fainted
+                if mon.get("hp", 0) > 0:
+                    if self.ball_sprite:
+                        screen.blit(self.ball_sprite, (ball_x + i * ball_spacing, ball_y))
+                    else:
+                        # Fallback to circles
+                        pg.draw.circle(screen, (255, 50, 50), (ball_x + i * ball_spacing + 12, ball_y + 12), 10)
+                        pg.draw.circle(screen, (255, 255, 255), (ball_x + i * ball_spacing + 12, ball_y + 12), 10, 2)
+                else:
+                    if self.ball_sprite_gray:
+                        screen.blit(self.ball_sprite_gray, (ball_x + i * ball_spacing, ball_y))
+                    else:
+                        # Fallback to circles
+                        pg.draw.circle(screen, (100, 100, 100), (ball_x + i * ball_spacing + 12, ball_y + 12), 10)
+                        pg.draw.circle(screen, (200, 200, 200), (ball_x + i * ball_spacing + 12, ball_y + 12), 10, 2)
 
         # Draw element type below HP
         player_element = self.player_mon.get("element", "Normal")

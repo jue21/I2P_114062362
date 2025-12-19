@@ -345,9 +345,10 @@ class GameScene(Scene):
         Logger.info(f"Battle started with {enemy.name}!")
         # Pass the first monster from the bag as the player's active monster
         player_mon = self.game_manager.bag.monsters[0] if self.game_manager.bag.monsters else None
-        # Generate a random monster for the enemy trainer
-        enemy_mon = generate_random_monster()
-        battle_scene = BattleScene(player=self.game_manager.player, player_mon=player_mon, enemy=enemy_mon, bag=self.game_manager.bag, game_manager=self.game_manager)
+        # Generate 2-3 random monsters for the enemy trainer
+        enemy_team_size = random.randint(2, 3)
+        enemy_team = [generate_random_monster() for _ in range(enemy_team_size)]
+        battle_scene = BattleScene(player=self.game_manager.player, player_mon=player_mon, enemy=enemy_team, bag=self.game_manager.bag, game_manager=self.game_manager)
         # Register a temporary scene (or you can use a key like "battle")
         scene_manager.register_scene("battle", battle_scene)
 
