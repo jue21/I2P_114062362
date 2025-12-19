@@ -214,6 +214,29 @@ class BattleScene(Scene):
         self.attacking_pokemon = None  # "player" or "enemy"
         self.player_idle_sprite = None
         self.enemy_idle_sprite = None
+        
+        # Ball throwing animation
+        self.ball_throwing = False
+        self.ball_throw_timer = 0.0
+        self.ball_throw_duration = 2.0  # 2 second throw animation
+        self.ball_sprite_throw = None
+        self.ball_start_pos = None
+        self.ball_end_pos = None
+        self.pending_catch_item = None
+        self.capture_animation = False  # Pokemon being absorbed into ball
+        self.capture_timer = 0.0
+        self.capture_duration = 1.5  # Duration of capture/shrink animation
+        self.original_enemy_sprite = None
+        self.capture_success = False
+        self.pokemon_captured = False  # Flag to track if Pokemon was successfully caught
+        
+        # Entrance animation - Pokemon emerging from pokeball
+        self.entrance_animation = True  # Start with entrance animation
+        self.entrance_timer = 0
+        self.entrance_duration = 2.0  # Total entrance animation duration
+        self.player_entrance_done = False
+        self.enemy_entrance_done = False
+        
         # Moves
         self.player_moves = safe_get_moves(self.player_mon)
         self.enemy_moves = safe_get_moves(self.enemy_mon)
@@ -692,31 +715,28 @@ class BattleScene(Scene):
     # ----- Handle Pokéball separately -----
         if "pokeball" in item_name or "ball" in item_name:
             if isinstance(self.enemy_obj, dict):
-                catch_chance = random.randint(1, 100)
-                if catch_chance > 30:
-                    item["count"] -= 1
-                    # Update original bag item count
-                    self._update_bag_item_count(item["name"], -1)
-                    self.enqueue_message(f"Used {item['name']}! You caught {self.enemy_mon['name']}!")
-                    if self.bag and hasattr(self.bag, 'monsters'):
-                        self.bag.monsters.append(self.enemy_mon.copy())
-                        # Save game after catching Pokémon
-                        if self.game_manager:
-                            self.game_manager.save("saves/game0.json")
-                        self._after_battle_end(victory=True)
-                else:
-                    item["count"] -= 1
-                    # Update original bag item count
-                    self._update_bag_item_count(item["name"], -1)
-                    self.enqueue_message(f"Used {item['name']}! {self.enemy_mon['name']} broke free!")
-                    self.submenu = "main"
-                    self.turn = "enemy"
+                # Start ball throwing animation
+                self.ball_throwing = True
+                self.ball_throw_timer = 0.0
+                self.ball_start_pos = (self.player_pos[0] + 150, self.player_pos[1] + 100)
+                self.ball_end_pos = (self.enemy_pos[0] + 150, self.enemy_pos[1] + 150)
+                self.pending_catch_item = item
+                self.pending_catch_item_idx = idx
+                
+                # Load ball sprite for animation
+                try:
+                    if self.ball_sprite:
+                        self.ball_sprite_throw = pg.transform.scale(self.ball_sprite, (32, 32))
+                    else:
+                        ball_path = str(Path("assets") / "images" / "ingame_ui" / "ball.png")
+                        ball_img = pg.image.load(ball_path).convert_alpha()
+                        self.ball_sprite_throw = pg.transform.scale(ball_img, (32, 32))
+                except Exception:
+                    pass
+                self.turn = "anim"
             else:
                 self.enqueue_message(f"Can't use {item['name']} on a trainer's Pokémon!")
             self._time_since_action = 0.0
-        # Update button text for **this item only**
-            if 0 <= idx < len(self.item_buttons):
-                self.item_buttons[idx].text = f"{item['name']} x{item['count']}"
             return
 
     # ----- Handle Heal Potion -----
@@ -797,6 +817,15 @@ class BattleScene(Scene):
 
     @override
     def update(self, dt: float):
+        # Update entrance animation
+        if self.entrance_animation:
+            self.entrance_timer += dt
+            if self.entrance_timer >= self.entrance_duration:
+                self.entrance_animation = False
+                self.player_entrance_done = True
+                self.enemy_entrance_done = True
+            return  # Skip other updates during entrance animation
+        
         # Update evolution display timer
         if self.evolution_display_timer > 0:
             self.evolution_display_timer -= dt
@@ -811,6 +840,60 @@ class BattleScene(Scene):
                 elif self.attacking_pokemon == "enemy" and self.enemy_idle_sprite:
                     self.enemy_mon["sprite"] = self.enemy_idle_sprite
                 self.attacking_pokemon = None
+        
+        # Update ball throwing animation
+        if self.ball_throwing:
+            self.ball_throw_timer += dt
+            if self.ball_throw_timer >= self.ball_throw_duration:
+                # Throw complete, start capture animation
+                self.ball_throwing = False
+                self.capture_animation = True
+                self.capture_timer = 0.0
+                self.original_enemy_sprite = self.enemy_mon.get("sprite")
+                # Determine catch success
+                catch_chance = random.randint(1, 100)
+                self.capture_success = catch_chance > 30
+            return  # Skip other updates during animation
+        
+        # Update capture animation (Pokemon shrinking into ball)
+        if self.capture_animation:
+            self.capture_timer += dt
+            if self.capture_timer >= self.capture_duration:
+                # Capture animation complete, process result
+                self.capture_animation = False
+                item = self.pending_catch_item
+                idx = self.pending_catch_item_idx
+                
+                if self.capture_success:
+                    item["count"] -= 1
+                    self._update_bag_item_count(item["name"], -1)
+                    self.enqueue_message(f"Used {item['name']}! You caught {self.enemy_mon['name']}!")
+                    # Hide enemy sprite after successful capture
+                    self.enemy_mon["sprite"] = None
+                    self.pokemon_captured = True
+                    if self.bag and hasattr(self.bag, 'monsters'):
+                        self.bag.monsters.append(self.enemy_mon.copy())
+                        if self.game_manager:
+                            self.game_manager.save("saves/game0.json")
+                        self._after_battle_end(victory=True)
+                else:
+                    item["count"] -= 1
+                    self._update_bag_item_count(item["name"], -1)
+                    # Restore original sprite
+                    if self.original_enemy_sprite:
+                        self.enemy_mon["sprite"] = self.original_enemy_sprite
+                    self.enqueue_message(f"Used {item['name']}! {self.enemy_mon['name']} broke free!")
+                    self.submenu = "main"
+                    self.turn = "enemy"
+                
+                # Update button text
+                if 0 <= idx < len(self.item_buttons):
+                    self.item_buttons[idx].text = f"{item['name']} x{item['count']}"
+                
+                self.pending_catch_item = None
+                self.ball_sprite_throw = None
+                self.original_enemy_sprite = None
+            return  # Skip other updates during animation
         
         if self.showing_message:
     # countdown timer
@@ -857,18 +940,124 @@ class BattleScene(Scene):
         else:
             screen.fill((60, 120, 180))  # fallback sky color
 
+        # Calculate entrance animation progress
+        entrance_progress = 0.0
+        if self.entrance_animation:
+            entrance_progress = min(1.0, self.entrance_timer / self.entrance_duration)
+        
+        # Draw entrance animation (Pokeballs releasing Pokemon)
+        if self.entrance_animation:
+            # Phase 1 (0-0.3): Show pokeballs
+            # Phase 2 (0.3-0.6): White flash/explosion
+            # Phase 3 (0.6-1.0): Pokemon growing from small to full size
+            
+            player_ball_pos = (self.player_pos[0] + 150, self.player_pos[1] + 150)
+            enemy_ball_pos = (self.enemy_pos[0] + 150, self.enemy_pos[1] + 150)
+            
+            if entrance_progress < 0.3:
+                # Phase 1: Draw pokeballs
+                ball_scale = 1.0 + 0.2 * (entrance_progress / 0.3)  # Slight grow
+                if self.ball_sprite:
+                    ball_size = int(40 * ball_scale)
+                    scaled_ball = pg.transform.scale(self.ball_sprite, (ball_size, ball_size))
+                    screen.blit(scaled_ball, (player_ball_pos[0] - ball_size // 2, player_ball_pos[1] - ball_size // 2))
+                    screen.blit(scaled_ball, (enemy_ball_pos[0] - ball_size // 2, enemy_ball_pos[1] - ball_size // 2))
+                else:
+                    # Fallback circles
+                    pg.draw.circle(screen, (255, 50, 50), player_ball_pos, int(20 * ball_scale))
+                    pg.draw.circle(screen, (255, 255, 255), player_ball_pos, int(20 * ball_scale), 3)
+                    pg.draw.circle(screen, (255, 50, 50), enemy_ball_pos, int(20 * ball_scale))
+                    pg.draw.circle(screen, (255, 255, 255), enemy_ball_pos, int(20 * ball_scale), 3)
+            
+            elif entrance_progress < 0.5:
+                # Phase 2: White flash/burst effect
+                flash_progress = (entrance_progress - 0.3) / 0.2
+                flash_alpha = int(255 * (1.0 - flash_progress))
+                flash_radius = int(50 + 100 * flash_progress)
+                
+                # Draw expanding white circles (flash effect)
+                flash_surf = pg.Surface((flash_radius * 2, flash_radius * 2), pg.SRCALPHA)
+                pg.draw.circle(flash_surf, (255, 255, 255, flash_alpha), (flash_radius, flash_radius), flash_radius)
+                screen.blit(flash_surf, (player_ball_pos[0] - flash_radius, player_ball_pos[1] - flash_radius))
+                screen.blit(flash_surf, (enemy_ball_pos[0] - flash_radius, enemy_ball_pos[1] - flash_radius))
+            
+            else:
+                # Phase 3: Pokemon growing from center
+                grow_progress = (entrance_progress - 0.5) / 0.5
+                scale = grow_progress  # 0.0 to 1.0
+                
+                # Draw player Pokemon growing
+                if self.player_mon.get("sprite") is not None:
+                    try:
+                        s = self.player_mon["sprite"]
+                        original_w, original_h = s.get_width(), s.get_height()
+                        new_w = int(original_w * scale)
+                        new_h = int(original_h * scale)
+                        if new_w > 0 and new_h > 0:
+                            scaled_sprite = pg.transform.scale(s, (new_w, new_h))
+                            # Center on player position
+                            draw_x = self.player_pos[0] + (original_w - new_w) // 2
+                            draw_y = self.player_pos[1] + (original_h - new_h) // 2
+                            screen.blit(scaled_sprite, (draw_x, draw_y))
+                    except:
+                        pass
+                
+                # Draw enemy Pokemon growing
+                if self.enemy_mon.get("sprite") is not None:
+                    try:
+                        s = self.enemy_mon["sprite"]
+                        original_w, original_h = s.get_width(), s.get_height()
+                        new_w = int(original_w * scale)
+                        new_h = int(original_h * scale)
+                        if new_w > 0 and new_h > 0:
+                            scaled_sprite = pg.transform.scale(s, (new_w, new_h))
+                            # Center on enemy position
+                            draw_x = self.enemy_pos[0] + (original_w - new_w) // 2
+                            draw_y = self.enemy_pos[1] + (original_h - new_h) // 2
+                            screen.blit(scaled_sprite, (draw_x, draw_y))
+                    except:
+                        pass
+            
+            # Draw "Go!" text during entrance
+            if entrance_progress > 0.2:
+                go_text = self.font_big.render("Go!", True, (255, 255, 255))
+                go_rect = go_text.get_rect(center=(GameSettings.SCREEN_WIDTH // 2, GameSettings.SCREEN_HEIGHT // 2 - 50))
+                screen.blit(go_text, go_rect)
+            
+            return  # Don't draw normal battle UI during entrance
+
         # Draw enemy sprite (if available)
-        if self.enemy_mon.get("sprite") is not None:
-            try:
-                s = self.enemy_mon["sprite"]
-                screen.blit(s, self.enemy_pos)
-            except Exception:
-                pass
-        else:
-            # placeholder box
-            pg.draw.rect(screen, (200, 60, 60), pg.Rect(self.enemy_pos[0], self.enemy_pos[1], 300, 300))
-            name_surf = self.font_med.render(self.enemy_mon.get("name", "Enemy"), True, (255, 255, 255))
-            screen.blit(name_surf, (self.enemy_pos[0], self.enemy_pos[1] - 24))
+        # Don't draw if Pokemon was successfully captured
+        if not self.pokemon_captured:
+            if self.enemy_mon.get("sprite") is not None:
+                try:
+                    s = self.enemy_mon["sprite"]
+                    # If capture animation is active, shrink the sprite
+                    if self.capture_animation and self.original_enemy_sprite:
+                        progress = self.capture_timer / self.capture_duration
+                        scale = 1.0 - progress  # Shrink from 1.0 to 0.0
+                        
+                        if scale > 0.05:  # Only draw if not too small
+                            original_rect = s.get_rect()
+                            new_width = int(original_rect.width * scale)
+                            new_height = int(original_rect.height * scale)
+                            
+                            if new_width > 0 and new_height > 0:
+                                shrunk_sprite = pg.transform.scale(s, (new_width, new_height))
+                                # Center the shrinking sprite at ball position
+                                shrunk_rect = shrunk_sprite.get_rect(center=(self.ball_end_pos[0], self.ball_end_pos[1]))
+                                screen.blit(shrunk_sprite, shrunk_rect)
+                    else:
+                        screen.blit(s, self.enemy_pos)
+                except Exception:
+                    pass
+            else:
+                # Only show placeholder if not during/after capture
+                if not self.capture_animation:
+                    # placeholder box
+                    pg.draw.rect(screen, (200, 60, 60), pg.Rect(self.enemy_pos[0], self.enemy_pos[1], 300, 300))
+                    name_surf = self.font_med.render(self.enemy_mon.get("name", "Enemy"), True, (255, 255, 255))
+                    screen.blit(name_surf, (self.enemy_pos[0], self.enemy_pos[1] - 24))
 
         # Draw player sprite
         if self.player_mon.get("sprite") is not None:
@@ -949,6 +1138,29 @@ class BattleScene(Scene):
                 for b in self.monster_buttons:
                     b.draw(screen)
 
+        # Draw ball throwing animation
+        if (self.ball_throwing or self.capture_animation) and self.ball_sprite_throw and self.ball_start_pos and self.ball_end_pos:
+            if self.ball_throwing:
+                # Calculate current position using parabolic arc
+                progress = self.ball_throw_timer / self.ball_throw_duration
+                progress = min(progress, 1.0)
+                
+                # Linear interpolation for x
+                current_x = self.ball_start_pos[0] + (self.ball_end_pos[0] - self.ball_start_pos[0]) * progress
+                
+                # Parabolic arc for y (goes up then down)
+                arc_height = 150  # How high the ball arcs
+                current_y = self.ball_start_pos[1] + (self.ball_end_pos[1] - self.ball_start_pos[1]) * progress
+                current_y -= arc_height * (1 - (2 * progress - 1) ** 2)  # Parabolic trajectory
+                
+                # Rotate the ball as it flies
+                rotation_angle = progress * 360 * 2  # 2 full rotations
+                rotated_ball = pg.transform.rotate(self.ball_sprite_throw, rotation_angle)
+                ball_rect = rotated_ball.get_rect(center=(int(current_x), int(current_y)))
+                screen.blit(rotated_ball, ball_rect)
+            elif self.capture_animation:
+                # Keep ball at end position during capture
+                screen.blit(self.ball_sprite_throw, self.ball_sprite_throw.get_rect(center=self.ball_end_pos))
 
         # Draw evolution display overlay
         if self.evolution_display_timer > 0 and self.evolution_display_text:

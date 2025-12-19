@@ -87,12 +87,12 @@
             {
               "name": "Pokeball",
               "price": 20,
-              "count": 14
+              "count": 7
             },
             {
               "name": "Great Ball",
               "price": 60,
-              "count": 8
+              "count": 5
             },
             {
               "name": "Ultra Ball",
@@ -169,34 +169,34 @@
   ],
   "current_map": "map.tmx",
   "player": {
-    "x": 15.422386001800103,
-    "y": 28.0
+    "x": 4.128142853498738,
+    "y": 15.0
   },
   "bag": {
     "monsters": [
       {
         "name": "Pikachu",
-        "hp": 120,
+        "hp": 39,
         "max_hp": 180,
-        "level": 25,
+        "level": 26,
         "sprite_path": "menu_sprites/menusprite16.png",
         "element": "Electric",
         "evolved_form": "",
         "evolution_level": 0
       },
       {
-        "name": "Charmander",
-        "hp": 50,
-        "max_hp": 50,
-        "level": 15,
-        "sprite_path": "menu_sprites/menusprite7.png",
+        "name": "Charmeleon",
+        "hp": 43,
+        "max_hp": 75,
+        "level": 16,
+        "sprite_path": "menu_sprites/menusprite8.png",
         "element": "Fire",
-        "evolved_form": "Charmeleon",
-        "evolution_level": 16
+        "evolved_form": "Charizard",
+        "evolution_level": 36
       },
       {
         "name": "Blastoise",
-        "hp": 120,
+        "hp": 106,
         "max_hp": 180,
         "level": 32,
         "sprite_path": "menu_sprites/menusprite14.png",
@@ -253,6 +253,66 @@
         "element": "Flying",
         "evolved_form": "",
         "evolution_level": 0
+      },
+      {
+        "name": "Charmander",
+        "hp": 39,
+        "max_hp": 50,
+        "level": 15,
+        "sprite_path": "menu_sprites/menusprite7.png",
+        "element": "Fire",
+        "evolved_form": "Charmeleon",
+        "evolution_level": 16
+      },
+      {
+        "name": "Squirtle",
+        "hp": 26,
+        "max_hp": 55,
+        "level": 15,
+        "sprite_path": "menu_sprites/menusprite12.png",
+        "element": "Water",
+        "evolved_form": "Wartortle",
+        "evolution_level": 16
+      },
+      {
+        "name": "Ivysaur",
+        "hp": 12,
+        "max_hp": 80,
+        "level": 16,
+        "sprite_path": "menu_sprites/menusprite2.png",
+        "element": "Grass",
+        "evolved_form": "Venusaur",
+        "evolution_level": 32
+      },
+      {
+        "name": "Pidgey",
+        "hp": 5,
+        "max_hp": 50,
+        "level": 5,
+        "sprite_path": "menu_sprites/menusprite5.png",
+        "element": "Flying",
+        "evolved_form": "",
+        "evolution_level": 0
+      },
+      {
+        "name": "Pikachu",
+        "hp": 13,
+        "max_hp": 100,
+        "level": 40,
+        "sprite_path": "menu_sprites/menusprite16.png",
+        "element": "Electric",
+        "evolved_form": "",
+        "evolution_level": 0
+      },
+      {
+        "name": "Rattata",
+        "hp": 13,
+        "max_hp": 55,
+        "level": 5,
+        "sprite_path": "menu_sprites/menusprite10.png",
+        "element": "Normal",
+        "evolved_form": "",
+        "evolution_level": 0
       }
     ],
     "items": [
@@ -276,19 +336,13 @@
       },
       {
         "name": "Coins",
-        "count": 3655,
+        "count": 3335,
         "sprite_path": "ingame_ui/coin.png",
         "item_type": null
       },
       {
-        "name": "Pokeball",
-        "count": 2,
-        "sprite_path": "ingame_ui/ball.png",
-        "item_type": "pokeball"
-      },
-      {
         "name": "Great Ball",
-        "count": 2,
+        "count": 4,
         "sprite_path": "ingame_ui/ball.png",
         "item_type": "pokeball"
       },
@@ -297,6 +351,11 @@
         "count": 1,
         "sprite_path": "ingame_ui/ball.png",
         "item_type": "pokeball"
+      },
+      {
+        "name": "Pokeball",
+        "count": 1,
+        "sprite_path": ""
       }
     ]
   }

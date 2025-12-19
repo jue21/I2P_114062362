@@ -1,6 +1,7 @@
 import pygame as pg
 import threading
 import time
+import math
 
 from src.scenes.scene import Scene
 from src.core import GameManager, OnlineManager
@@ -77,6 +78,18 @@ class GameScene(Scene):
         self.bush_warning_visible = False
         self.bush_warning_position = None
 
+        # --- Battle Transition (Cloud Screen) ---
+        self.transition_active = False
+        self.transition_timer = 0.0
+        self.transition_duration = 1.5  # Total transition duration
+        self.transition_phase = "in"  # "in" = clouds coming in, "out" = clouds going out
+        self.pending_battle_scene = None
+        self.pending_battle_scene_name = None
+        self._init_cloud_surfaces()
+
+        # --- Christmas Decorations ---
+        self._init_christmas_decorations()
+
         # --- Mini-map setup ---
         self.minimap_size = 200  # mini-map is 200x200 pixels
         self.minimap_pos = (10, 10)  # top-left corner with 10px padding
@@ -124,13 +137,24 @@ class GameScene(Scene):
 
         # --- Top-right navigation button (beside shop) ---
         self.navigation_button = Button(
-            "UI/button_setting.png",
-            "UI/button_setting_hover.png",
+            "UI/raw/UI_Flat_Button02a_4.png",
+            "UI/raw/UI_Flat_Button02a_4.png",  # Will handle hover effect manually
             GameSettings.SCREEN_WIDTH - 360,  # left of shop button
             20,
             70, 70,
             lambda: self._open_navigation()
         )
+        
+        # Load navigation logo
+        self.navigation_logo = None
+        try:
+            self.navigation_logo = pg.image.load("assets/images/direction-icon-png-4710.png").convert_alpha()
+            self.navigation_logo = pg.transform.scale(self.navigation_logo, (50, 50))
+        except Exception:
+            pass
+        
+        # Navigation button hover effect
+        self.navigation_button_hover_scale = 1.0
         
         # --- Navigation Overlay ---
         self.navigation_overlay = NavigationOverlay(self.game_manager)
@@ -338,25 +362,27 @@ class GameScene(Scene):
         Called when player interacts with enemy to start battle.
         """
         
-    # Example: switch to your BattleScene
-    # You would replace this with your actual scene switch logic
+        # Switch to BattleScene with cloud transition
         from src.scenes.battle_scene import BattleScene
         from src.core.services import scene_manager
         Logger.info(f"Battle started with {enemy.name}!")
         # Pass the first monster from the bag as the player's active monster
         player_mon = self.game_manager.bag.monsters[0] if self.game_manager.bag.monsters else None
-        # Generate 2-3 random monsters for the enemy trainer
-        enemy_team_size = random.randint(2, 3)
+        # Generate 1-3 random monsters for the enemy trainer
+        enemy_team_size = random.randint(1, 3)
         enemy_team = [generate_random_monster() for _ in range(enemy_team_size)]
         battle_scene = BattleScene(player=self.game_manager.player, player_mon=player_mon, enemy=enemy_team, bag=self.game_manager.bag, game_manager=self.game_manager)
-        # Register a temporary scene (or you can use a key like "battle")
-        scene_manager.register_scene("battle", battle_scene)
-
-    # Switch to the battle scene
-        scene_manager.change_scene("battle")
+        
+        # Start cloud transition instead of immediate scene change
+        self._start_battle_transition(battle_scene, "battle")
 
     @override
     def update(self, dt: float):
+        # Update battle transition if active
+        if self.transition_active:
+            self._update_transition(dt)
+            return  # Skip other updates during transition
+        
         # Update game objects first
         prev_map_key = self.game_manager.current_map_key
         self.game_manager.try_switch_map()
@@ -383,6 +409,9 @@ class GameScene(Scene):
         for shopkeeper in self.game_manager.current_map.shopkeepers:
             shopkeeper.animation.update_pos(shopkeeper.position)
         self.game_manager.bag.update(dt)
+        
+        # Update Christmas snowflakes
+        self._update_snowflakes(dt)
 
         if self.game_manager.player and self.online_manager:
             # Convert direction enum to string
@@ -500,14 +529,14 @@ class GameScene(Scene):
                     for bush in self.game_manager.current_map.bushes:
                         in_bush = hasattr(bush, 'in_bush') and bush.in_bush
                         if in_bush:
-                            # Trigger wild monster battle
+                            # Trigger wild monster battle with cloud transition
                             wild_monster = generate_random_monster()
                             from src.scenes.battle_scene import BattleScene
                             Logger.info(f"Wild {wild_monster['name']} appeared!")
                             player_mon = self.game_manager.bag.monsters[0] if self.game_manager.bag.monsters else None
                             battle_scene = BattleScene(player=self.game_manager.player, player_mon=player_mon, enemy=wild_monster, bag=self.game_manager.bag, game_manager=self.game_manager)
-                            scene_manager.register_scene("wild_battle", battle_scene)
-                            scene_manager.change_scene("wild_battle")
+                            # Start cloud transition instead of immediate scene change
+                            self._start_battle_transition(battle_scene, "wild_battle")
                             break
 
         # self.warning_visible = False
@@ -534,6 +563,14 @@ class GameScene(Scene):
         self.settings_button.update(dt)
         self.backpack_button.update(dt)
         self.navigation_button.update(dt)
+        
+        # Update navigation button hover effect
+        mx, my = pg.mouse.get_pos()
+        nav_rect = self.navigation_button.hitbox
+        if nav_rect.collidepoint(mx, my):
+            self.navigation_button_hover_scale = min(1.15, self.navigation_button_hover_scale + dt * 2)
+        else:
+            self.navigation_button_hover_scale = max(1.0, self.navigation_button_hover_scale - dt * 2)
 
         # Check if player is near a shopkeeper and show shop button
         self.shop_button_visible = False
@@ -773,6 +810,148 @@ class GameScene(Scene):
             txt = item_font.render(f"{item_name} x{item['count']}", True, (20,20,20))
             screen.blit(txt, (text_x, item_y + 8))
 
+    def _init_cloud_surfaces(self):
+        """Initialize cloud surfaces for battle transition effect"""
+        sw, sh = GameSettings.SCREEN_WIDTH, GameSettings.SCREEN_HEIGHT
+        
+        # Create multiple cloud "puffs" at different positions
+        self.clouds = []
+        num_clouds = 15
+        for i in range(num_clouds):
+            cloud_w = random.randint(150, 300)
+            cloud_h = random.randint(100, 200)
+            cloud_surf = pg.Surface((cloud_w, cloud_h), pg.SRCALPHA)
+            
+            # Draw fluffy cloud shape using overlapping circles
+            base_color = (240, 240, 250)
+            num_puffs = random.randint(5, 8)
+            for _ in range(num_puffs):
+                puff_x = random.randint(20, cloud_w - 20)
+                puff_y = random.randint(20, cloud_h - 20)
+                puff_r = random.randint(30, 60)
+                pg.draw.circle(cloud_surf, base_color, (puff_x, puff_y), puff_r)
+            
+            # Random starting position (off-screen)
+            start_x = random.randint(-cloud_w, sw)
+            start_y = random.randint(-cloud_h, sh)
+            
+            # Direction to move (towards center then covering screen)
+            self.clouds.append({
+                'surface': cloud_surf,
+                'start_x': start_x if random.random() > 0.5 else sw + random.randint(0, 200),
+                'start_y': start_y,
+                'target_x': random.randint(0, sw - cloud_w),
+                'target_y': random.randint(0, sh - cloud_h),
+                'delay': random.uniform(0, 0.3)  # Staggered appearance
+            })
+    
+    def _start_battle_transition(self, battle_scene, scene_name: str):
+        """Start the cloud transition effect before switching to battle"""
+        self.transition_active = True
+        self.transition_timer = 0.0
+        self.transition_phase = "in"
+        self.pending_battle_scene = battle_scene
+        self.pending_battle_scene_name = scene_name
+        # Regenerate cloud positions for fresh animation
+        self._init_cloud_surfaces()
+    
+    def _update_transition(self, dt: float):
+        """Update the cloud transition animation"""
+        if not self.transition_active:
+            return
+        
+        self.transition_timer += dt
+        
+        # When clouds fully cover screen, switch scene
+        if self.transition_phase == "in" and self.transition_timer >= self.transition_duration:
+            # Switch to battle scene
+            scene_manager.register_scene(self.pending_battle_scene_name, self.pending_battle_scene)
+            scene_manager.change_scene(self.pending_battle_scene_name)
+            self.transition_active = False
+            self.pending_battle_scene = None
+            self.pending_battle_scene_name = None
+    
+    def _draw_transition(self, screen: pg.Surface):
+        """Draw the cloud transition effect"""
+        if not self.transition_active:
+            return
+        
+        progress = min(1.0, self.transition_timer / self.transition_duration)
+        
+        # Draw each cloud moving towards its target position
+        for cloud in self.clouds:
+            # Account for staggered delay
+            cloud_progress = max(0, (self.transition_timer - cloud['delay']) / (self.transition_duration - 0.3))
+            cloud_progress = min(1.0, cloud_progress)
+            
+            # Ease-in effect for smoother animation
+            eased_progress = cloud_progress * cloud_progress * (3 - 2 * cloud_progress)
+            
+            # Calculate current position
+            start_x = cloud['start_x']
+            start_y = cloud['start_y']
+            target_x = cloud['target_x']
+            target_y = cloud['target_y']
+            
+            current_x = start_x + (target_x - start_x) * eased_progress
+            current_y = start_y + (target_y - start_y) * eased_progress
+            
+            # Scale up slightly as they approach
+            scale = 1.0 + 0.5 * eased_progress
+            scaled_surf = pg.transform.scale(
+                cloud['surface'],
+                (int(cloud['surface'].get_width() * scale), int(cloud['surface'].get_height() * scale))
+            )
+            
+            screen.blit(scaled_surf, (int(current_x), int(current_y)))
+        
+        # Add a white overlay that fades in as transition completes
+        if progress > 0.6:
+            overlay_alpha = int(255 * (progress - 0.6) / 0.4)
+            white_overlay = pg.Surface((GameSettings.SCREEN_WIDTH, GameSettings.SCREEN_HEIGHT), pg.SRCALPHA)
+            white_overlay.fill((255, 255, 255, overlay_alpha))
+            screen.blit(white_overlay, (0, 0))
+
+    def _init_christmas_decorations(self):
+        """Initialize Christmas decorations - snowflakes"""
+        # Snowflakes list: each is [x, y, speed, size, sway_offset]
+        self.snowflakes = []
+        for _ in range(30):  # 30 snowflakes
+            self.snowflakes.append([
+                random.randint(0, GameSettings.SCREEN_WIDTH),  # x
+                random.randint(-50, GameSettings.SCREEN_HEIGHT),  # y
+                random.uniform(30, 80),  # fall speed
+                random.randint(2, 5),  # size
+                random.uniform(0, 6.28)  # sway phase
+            ])
+        self.snowflake_time = 0
+    
+    def _update_snowflakes(self, dt: float):
+        """Update snowflake positions"""
+        self.snowflake_time += dt
+        for flake in self.snowflakes:
+            # Fall down
+            flake[1] += flake[2] * dt
+            # Sway left/right using sine wave
+            flake[4] += dt * 2
+            flake[0] += 20 * dt * (0.5 + 0.5 * math.sin(flake[4]))
+            
+            # Reset if off screen
+            if flake[1] > GameSettings.SCREEN_HEIGHT + 10:
+                flake[1] = random.randint(-30, -10)
+                flake[0] = random.randint(0, GameSettings.SCREEN_WIDTH)
+    
+    def _draw_snowflakes(self, screen: pg.Surface):
+        """Draw falling snowflakes"""
+        for flake in self.snowflakes:
+            # Draw snowflake as white circle with slight glow
+            x, y = int(flake[0]), int(flake[1])
+            size = flake[3]
+            # Outer glow
+            pg.draw.circle(screen, (200, 200, 255, 100), (x, y), size + 1)
+            # Core
+            pg.draw.circle(screen, (255, 255, 255), (x, y), size)
+
     def _create_minimap(self):
         """Create a mini-map surface for the current map with actual map colors"""
         try:
@@ -858,6 +1037,18 @@ class GameScene(Scene):
             # Fallback to green circle
             pg.draw.circle(screen, (0, 255, 0), (player_screen_x, player_screen_y), 4)
             pg.draw.circle(screen, (0, 200, 0), (player_screen_x, player_screen_y), 4, 1)
+        
+        # Draw snowflakes on minimap
+        minimap_w = self.minimap_surface.get_width()
+        minimap_h = self.minimap_surface.get_height()
+        for flake in self.snowflakes:
+            # Scale snowflake position to minimap
+            flake_x = int(flake[0] / GameSettings.SCREEN_WIDTH * minimap_w) + self.minimap_pos[0]
+            flake_y = int(flake[1] / GameSettings.SCREEN_HEIGHT * minimap_h) + self.minimap_pos[1]
+            # Only draw if within minimap bounds
+            if (self.minimap_pos[0] <= flake_x < self.minimap_pos[0] + minimap_w and
+                self.minimap_pos[1] <= flake_y < self.minimap_pos[1] + minimap_h):
+                pg.draw.circle(screen, (255, 255, 255), (flake_x, flake_y), 1)
 
     @override
     def draw(self, screen: pg.Surface):
@@ -870,6 +1061,7 @@ class GameScene(Scene):
                 player.position.y - GameSettings.SCREEN_HEIGHT // 2
             )
             self.game_manager.current_map.draw(screen, camera)
+            
             player.draw(screen, camera)
         else:
             if self.game_manager.current_map:
@@ -908,9 +1100,34 @@ class GameScene(Scene):
         # --- Draw UI buttons ---
         self.settings_button.draw(screen)
         self.backpack_button.draw(screen)
-        self.navigation_button.draw(screen)
+        
+        # Draw navigation button with logo and hover effect
+        # Draw button with hover effect (scale the button itself)
+        if self.navigation_button_hover_scale > 1.0:
+            # Scale button when hovering
+            button_img = self.navigation_button.img_button.image
+            scaled_size = (int(70 * self.navigation_button_hover_scale), int(70 * self.navigation_button_hover_scale))
+            scaled_button = pg.transform.scale(button_img, scaled_size)
+            button_x = self.navigation_button.hitbox.x + 35 - scaled_size[0] // 2
+            button_y = self.navigation_button.hitbox.y + 35 - scaled_size[1] // 2
+            screen.blit(scaled_button, (button_x, button_y))
+        else:
+            # Normal button
+            self.navigation_button.draw(screen)
+        
+        # Draw logo on top
+        if self.navigation_logo:
+            logo_size = int(50 * self.navigation_button_hover_scale)
+            scaled_logo = pg.transform.scale(self.navigation_logo, (logo_size, logo_size))
+            logo_x = self.navigation_button.hitbox.x + 35 - logo_size // 2
+            logo_y = self.navigation_button.hitbox.y + 35 - logo_size // 2
+            screen.blit(scaled_logo, (logo_x, logo_y))
+        
         if self.shop_button_visible:
             self.shop_button.draw(screen)
+
+        # --- Draw falling snowflakes ---
+        self._draw_snowflakes(screen)
 
         # --- Draw mini-map ---
         self._draw_minimap(screen)
@@ -988,6 +1205,10 @@ class GameScene(Scene):
         # --- CHAT OVERLAY ---
         if self._chat_overlay:
             self._chat_overlay.draw(screen)
+        
+        # --- BATTLE TRANSITION (cloud screen) ---
+        if self.transition_active:
+            self._draw_transition(screen)
     
     def _draw_chat_bubbles(self, screen: pg.Surface, camera: PositionCamera) -> None:
         """Draw chat bubbles above players."""

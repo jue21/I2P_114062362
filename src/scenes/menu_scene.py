@@ -13,6 +13,9 @@ class MenuScene(Scene):
     # Buttons
     play_button: Button
     setting_button: Button
+    # Banner
+    banner: pg.Surface | None
+    banner_font: pg.font.Font | None
     
     def __init__(self):
         super().__init__()
@@ -29,6 +32,19 @@ class MenuScene(Scene):
             px - 150, py, 100, 100,
             lambda: scene_manager.change_scene("setting")
         )
+        
+        # Load banner
+        self.banner = None
+        self.banner_font = None
+        try:
+            self.banner = pg.image.load("assets/images/UI/raw/UI_Flat_Banner02a.png").convert_alpha()
+            self.banner = pg.transform.scale(self.banner, (400, 150))
+            self.banner_font = pg.font.Font("assets/fonts/Minecraft.ttf", 48)
+        except Exception:
+            try:
+                self.banner_font = pg.font.Font(None, 48)
+            except:
+                pass
         
     @override
     def enter(self) -> None:
@@ -49,6 +65,19 @@ class MenuScene(Scene):
     @override
     def draw(self, screen: pg.Surface) -> None:
         self.background.draw(screen)
+        
+        # Draw banner with "Pokemon" text
+        if self.banner is not None:
+            banner_x = GameSettings.SCREEN_WIDTH // 2 - self.banner.get_width() // 2
+            banner_y = GameSettings.SCREEN_HEIGHT // 4 - self.banner.get_height() // 2
+            screen.blit(self.banner, (banner_x, banner_y))
+            
+            if self.banner_font is not None:
+                text_surface = self.banner_font.render("Pokemon", True, (255, 215, 0))  # Gold color
+                text_x = GameSettings.SCREEN_WIDTH // 2 - text_surface.get_width() // 2
+                text_y = banner_y + self.banner.get_height() // 2 - text_surface.get_height() // 2
+                screen.blit(text_surface, (text_x, text_y))
+        
         self.play_button.draw(screen)
         self.setting_button.draw(screen)
 
