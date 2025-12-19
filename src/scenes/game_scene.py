@@ -10,6 +10,7 @@ from src.sprites import Sprite, Animation
 from src.interface.components import Button
 from src.interface.components.shop_overlay import ShopOverlay
 from src.interface.components.navigation_overlay import NavigationOverlay
+from src.interface.components.chat_overlay import ChatOverlay
 from typing import override, Dict, Tuple
 from src.interface.components import Checkbox, Slider
 from src.utils.definition import load_monster_sprites
@@ -51,9 +52,12 @@ class GameScene(Scene):
         self._online_last_pos: Dict[int, Position] = {}
         self._last_chat_id_seen = 0
         self._chat_font = pg.font.Font(None, 20)
-        self._chat_input_active = False
-        self._chat_input_text = ""
-        self._last_chat_key = None
+        
+        # --- Chat Overlay ---
+        self._chat_overlay = ChatOverlay(
+            send_callback=self._send_chat_message,
+            get_messages=self._get_chat_messages
+        ) if GameSettings.IS_ONLINE else None
         
         # --- Overlay / Menu state ---
         self.overlay_open = False
@@ -369,7 +373,9 @@ class GameScene(Scene):
             self._minimap_needs_update = False
         
         if self.game_manager.player:
-            self.game_manager.player.update(dt)
+            # Don't update player movement when chat is open
+            if not (self._chat_overlay and self._chat_overlay.is_open):
+                self.game_manager.player.update(dt)
         for enemy in self.game_manager.current_enemy_trainers:
             enemy.update(dt)
         # Update shopkeeper positions for collision detection (but don't animate)
@@ -442,82 +448,11 @@ class GameScene(Scene):
             except Exception:
                 pass
         
-        # Handle chat input (press 'T' to open chat, ESC to close)
-        if input_manager.key_pressed(pg.K_t) and self.online_manager and not self._chat_input_active:
-            self._chat_input_active = True
-            self._chat_input_text = ""
-        
-        if self._chat_input_active:
-            # Handle text input using key states
-            if input_manager.key_pressed(pg.K_RETURN):
-                if self._chat_input_text.strip() and self.online_manager:
-                    self.online_manager.send_chat(self._chat_input_text)
-                    # Show your own chat bubble immediately
-                    now = time.monotonic()
-                    self._chat_bubbles[self.online_manager.player_id] = (self._chat_input_text, now + 5.0)
-                    self._last_chat_id_seen = int(time.monotonic() * 1000)  # Update ID to avoid duplicate
-                    self._chat_input_text = ""
-                    self._chat_input_active = False
-            elif input_manager.key_pressed(pg.K_BACKSPACE):
-                self._chat_input_text = self._chat_input_text[:-1]
-            elif input_manager.key_pressed(pg.K_ESCAPE):
-                self._chat_input_active = False
-                self._chat_input_text = ""
-            
-            # Handle character input from held keys (letters, numbers, space, punctuation)
-            keys = pg.key.get_pressed()
-            shift_pressed = keys[pg.K_LSHIFT] or keys[pg.K_RSHIFT]
-            
-            # Character mapping for keys (includes T now)
-            char_map = {
-                pg.K_SPACE: ' ',
-                pg.K_0: '0', pg.K_1: '1', pg.K_2: '2', pg.K_3: '3', pg.K_4: '4',
-                pg.K_5: '5', pg.K_6: '6', pg.K_7: '7', pg.K_8: '8', pg.K_9: '9',
-                pg.K_a: 'A' if shift_pressed else 'a',
-                pg.K_b: 'B' if shift_pressed else 'b',
-                pg.K_c: 'C' if shift_pressed else 'c',
-                pg.K_d: 'D' if shift_pressed else 'd',
-                pg.K_e: 'E' if shift_pressed else 'e',
-                pg.K_f: 'F' if shift_pressed else 'f',
-                pg.K_g: 'G' if shift_pressed else 'g',
-                pg.K_h: 'H' if shift_pressed else 'h',
-                pg.K_i: 'I' if shift_pressed else 'i',
-                pg.K_j: 'J' if shift_pressed else 'j',
-                pg.K_k: 'K' if shift_pressed else 'k',
-                pg.K_l: 'L' if shift_pressed else 'l',
-                pg.K_m: 'M' if shift_pressed else 'm',
-                pg.K_n: 'N' if shift_pressed else 'n',
-                pg.K_o: 'O' if shift_pressed else 'o',
-                pg.K_p: 'P' if shift_pressed else 'p',
-                pg.K_q: 'Q' if shift_pressed else 'q',
-                pg.K_r: 'R' if shift_pressed else 'r',
-                pg.K_s: 'S' if shift_pressed else 's',
-                pg.K_t: 'T' if shift_pressed else 't',
-                pg.K_u: 'U' if shift_pressed else 'u',
-                pg.K_v: 'V' if shift_pressed else 'v',
-                pg.K_w: 'W' if shift_pressed else 'w',
-                pg.K_x: 'X' if shift_pressed else 'x',
-                pg.K_y: 'Y' if shift_pressed else 'y',
-                pg.K_z: 'Z' if shift_pressed else 'z',
-                pg.K_PERIOD: '.',
-                pg.K_COMMA: ',',
-                pg.K_QUESTION: '?' if shift_pressed else '/',
-                pg.K_MINUS: '_' if shift_pressed else '-',
-            }
-            
-            # Add character if a key is down
-            for key, char in char_map.items():
-                if keys[key] and len(self._chat_input_text) < 100:
-                    # Only add if this key wasn't already in the text
-                    # (prevent rapid character repetition)
-                    if not hasattr(self, '_last_chat_key') or self._last_chat_key != key:
-                        self._chat_input_text += char
-                        self._last_chat_key = key
-                        break
-            
-            # Reset last key when no character keys are pressed
-            if not any(keys[k] for k in char_map.keys()):
-                self._last_chat_key = None
+        # Update chat overlay
+        if self._chat_overlay:
+            if input_manager.key_pressed(pg.K_t):
+                self._chat_overlay.open()
+            self._chat_overlay.update(dt)
 
         # Bush state tracking - MUST happen before spacebar check
         if self.game_manager.player:
@@ -1049,9 +984,9 @@ class GameScene(Scene):
         if self.shop_open and self.shop_overlay:
             self.shop_overlay.draw(screen)
         
-        # Draw chat input UI
-        if self._chat_input_active:
-            self._draw_chat_input(screen)
+        # --- CHAT OVERLAY ---
+        if self._chat_overlay:
+            self._chat_overlay.draw(screen)
     
     def _draw_chat_bubbles(self, screen: pg.Surface, camera: PositionCamera) -> None:
         """Draw chat bubbles above players."""
@@ -1124,21 +1059,25 @@ class GameScene(Scene):
         # Draw text
         screen.blit(text_surface, (bubble_x - text_width // 2, bubble_y + padding))
     
-    def _draw_chat_input(self, screen: pg.Surface) -> None:
-        """Draw chat input box at bottom of screen."""
-        input_height = 35
-        input_y = GameSettings.SCREEN_HEIGHT - input_height - 5
-        input_rect = pg.Rect(10, input_y, GameSettings.SCREEN_WIDTH - 20, input_height)
-        
-        # Draw background
-        pg.draw.rect(screen, (200, 200, 200), input_rect)
-        pg.draw.rect(screen, (0, 0, 0), input_rect, 2)
-        
-        # Draw input text
-        display_text = self._chat_input_text + ("|" if int(time.monotonic() * 2) % 2 else "")
-        text_surface = self._chat_font.render(display_text, True, (0, 0, 0))
-        screen.blit(text_surface, (input_rect.x + 5, input_rect.y + 8))
-        
-        # Draw hint text
-        hint = self._chat_font.render("Press ENTER to send, ESC to cancel", True, (100, 100, 100))
-        screen.blit(hint, (input_rect.x + 5, input_rect.y + 20))
+    def _send_chat_message(self, message: str) -> bool:
+        """Callback for sending chat messages."""
+        if not self.online_manager:
+            return False
+        try:
+            self.online_manager.send_chat(message)
+            # Add to local chat bubbles immediately
+            now = time.monotonic()
+            self._chat_bubbles[self.online_manager.player_id] = (message, now + 5.0)
+            return True
+        except Exception as e:
+            Logger.warning(f"Failed to send chat message: {e}")
+            return False
+    
+    def _get_chat_messages(self, count: int) -> list[dict]:
+        """Callback for getting recent chat messages."""
+        if not self.online_manager:
+            return []
+        try:
+            return self.online_manager.get_recent_chat(count)
+        except Exception:
+            return []
