@@ -64,6 +64,7 @@ TYPE_EFFECTIVENESS = {
     PokemonType.ELECTRIC: {
         PokemonType.WATER: 2.0,      # Electric is strong against Water
         PokemonType.FLYING: 2.0,
+        PokemonType.ICE: 2.0,
         PokemonType.GROUND: 0.0,     # Electric is ineffective against Ground
     },
     PokemonType.ICE: {

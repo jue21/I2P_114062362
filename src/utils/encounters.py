@@ -29,12 +29,13 @@ def evolve_pokemon(pokemon: dict) -> bool:
     
     # Apply evolution
     stat_mult = evo_data["stat_mult"]
+    old_level = pokemon.get("level", 1)
     pokemon["name"] = evo_data["evolved_form"]
     pokemon["sprite_path"] = evo_data["sprite_path"]
     pokemon["sprite"] = None  # Will be reloaded
     pokemon["hp"] = int(pokemon.get("hp", 50) * stat_mult.get("hp", 1.2))
     pokemon["max_hp"] = int(pokemon.get("max_hp", 50) * stat_mult.get("max_hp", 1.2))
-    
+    pokemon["level"] = old_level  # Preserve level after evolution
     # Update evolution data for new form
     new_name = evo_data["evolved_form"]
     if new_name in EVOLUTION_DATA:
@@ -44,7 +45,6 @@ def evolve_pokemon(pokemon: dict) -> bool:
     else:
         pokemon["evolved_form"] = ""
         pokemon["evolution_level"] = 0
-    
     return True
 
 def generate_random_monster() -> dict:
@@ -62,7 +62,7 @@ def generate_random_monster() -> dict:
         
         # Blastoise line (menusprite 12, 13, 14)
         {"name": "Squirtle",   "hp": 44,  "max_hp": 55,  "level": 15, "sprite_path": "menu_sprites/menusprite12.png", "element": "Water", "evolved_form": "Wartortle", "evolution_level": 16},
-        {"name": "Wartortle",  "hp": 59,  "max_hp": 80,  "level": 30, "sprite_path": "menu_sprites/menusprite13.png", "element": "Water", "evolved_form": "Blastoise", "evolution_level": 36},
+        {"name": "Wartortle",  "hp": 59,  "max_hp": 80,  "level": 16, "sprite_path": "menu_sprites/menusprite13.png", "element": "Water", "evolved_form": "Blastoise", "evolution_level": 36},
         {"name": "Blastoise",  "hp": 120, "max_hp": 180, "level": 40, "sprite_path": "menu_sprites/menusprite14.png", "element": "Water", "evolved_form": "", "evolution_level": 0},
         
         # Pikachu line (menusprite 15, 16)

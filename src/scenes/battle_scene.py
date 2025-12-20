@@ -14,12 +14,13 @@ from src.utils.encounters import evolve_pokemon
 
 class TextButton:
     """Simple rectangle button with text, hover & click detection (no external Button required)."""
-    def __init__(self, x: int, y: int, w: int, h: int, text: str, on_click: Optional[Callable] = None, font=None):
+    def __init__(self, x: int, y: int, w: int, h: int, text: str, on_click: Optional[Callable] = None, font=None, button_bg_img=None):
         self.rect = pg.Rect(x, y, w, h)
         self.text = text
         self.on_click = on_click
         self.hovered = False
         self.font = font or pg.font.Font(None, 24)
+        self.button_bg_img = button_bg_img
         # Initialize based on current mouse state to prevent immediate clicks
         self._mouse_was_down = pg.mouse.get_pressed()[0]
 
@@ -35,10 +36,13 @@ class TextButton:
         self._mouse_was_down = pressed[0]
 
     def draw(self, surf: pg.Surface):
-        bg = (240, 240, 240) if not self.hovered else (255, 255, 255)
-        pg.draw.rect(surf, bg, self.rect)
-        pg.draw.rect(surf, (0, 0, 0), self.rect, 2)  # border
-
+        if self.button_bg_img is not None:
+            img = pg.transform.scale(self.button_bg_img, (self.rect.width, self.rect.height))
+            surf.blit(img, self.rect)
+        else:
+            bg = (240, 240, 240) if not self.hovered else (255, 255, 255)
+            pg.draw.rect(surf, bg, self.rect)
+            pg.draw.rect(surf, (0, 0, 0), self.rect, 2)  # border
         txt = self.font.render(self.text, True, (0, 0, 0))
         txt_r = txt.get_rect(center=self.rect.center)
         surf.blit(txt, txt_r)
@@ -46,10 +50,10 @@ class TextButton:
 
 class ItemButton(TextButton):
     """Item button that stores item index to avoid lambda capture issues."""
-    def __init__(self, x: int, y: int, w: int, h: int, item_idx: int, text: str, scene: "BattleScene", font=None):
+    def __init__(self, x: int, y: int, w: int, h: int, item_idx: int, text: str, scene: "BattleScene", font=None, button_bg_img=None):
         self.item_idx = item_idx
         self.scene = scene
-        super().__init__(x, y, w, h, text, on_click=self._on_item_click, font=font)
+        super().__init__(x, y, w, h, text, on_click=self._on_item_click, font=font, button_bg_img=button_bg_img)
     
     def _on_item_click(self):
         """Called when this item button is clicked."""
@@ -120,6 +124,28 @@ def safe_get_moves(monster: dict):
 
 class BattleScene(Scene):
     def __init__(self, player, enemy, player_mon=None, bag=None, game_manager=None):
+        # Load button background image for all buttons
+        self.button_bg_img = None
+        try:
+            bar_path = str(Path("assets") / "images" / "UI" / "raw" / "UI_Flat_Bar01a.png")
+            self.button_bg_img = pg.image.load(bar_path).convert_alpha()
+        except Exception:
+            self.button_bg_img = None
+        # Fainting animation state
+        self.player_fainting = False
+        self.player_faint_timer = 0.0
+        self.player_faint_duration = 0.8
+        self.enemy_fainting = False
+        self.enemy_faint_timer = 0.0
+        self.enemy_faint_duration = 0.8
+        super().__init__()
+        # Fainting animation state
+        self.player_fainting = False
+        self.player_faint_timer = 0.0
+        self.player_faint_duration = 0.8
+        self.enemy_fainting = False
+        self.enemy_faint_timer = 0.0
+        self.enemy_faint_duration = 0.8
         super().__init__()
         self.player_obj = player
         self.enemy_obj = enemy
@@ -202,9 +228,9 @@ class BattleScene(Scene):
         # State
         self.turn = "player"     # "player" or "enemy" or "anim"
         self.submenu = "main"    # "main", "fight", "bag", "monsters"
-        self.message_queue: list[str] = []        # keep as before
-        self.current_message_timer: float = 0.0   # countdown for message duration
-        self.message_duration_default: float = 2.0  # 2 seconds default
+        self.message_queue = []        # keep as before
+        self.current_message_timer = 0.0   # countdown for message duration
+        self.message_duration_default = 2.0  # 2 seconds default
         self.showing_message = False
 
         # Stat boosts from items (multipliers, reset when battle ends)
@@ -272,10 +298,10 @@ class BattleScene(Scene):
 
         # Main command text buttons (FIGHT, BAG, MONSTERS, RUN) - horizontal layout
         self.main_buttons = [
-            TextButton(menu_start_x + 0 * gap, menu_y, menu_w, menu_h, "FIGHT", on_click=self.open_fight),
-            TextButton(menu_start_x + 1 * gap, menu_y, menu_w, menu_h, "BAG", on_click=self.open_bag),
-            TextButton(menu_start_x + 2 * gap, menu_y, menu_w, menu_h, "MONSTERS", on_click=self.open_monsters),
-            TextButton(menu_start_x + 3 * gap, menu_y, menu_w, menu_h, "RUN", on_click=self.attempt_run),
+            TextButton(menu_start_x + 0 * gap, menu_y, menu_w, menu_h, "FIGHT", on_click=self.open_fight, button_bg_img=self.button_bg_img),
+            TextButton(menu_start_x + 1 * gap, menu_y, menu_w, menu_h, "BAG", on_click=self.open_bag, button_bg_img=self.button_bg_img),
+            TextButton(menu_start_x + 2 * gap, menu_y, menu_w, menu_h, "MONSTERS", on_click=self.open_monsters, button_bg_img=self.button_bg_img),
+            TextButton(menu_start_x + 3 * gap, menu_y, menu_w, menu_h, "RUN", on_click=self.attempt_run, button_bg_img=self.button_bg_img),
         ]
 
         # Fight menu move buttons (5 buttons): Quick Hit, Growl, Bash, Power, Tackle
@@ -290,7 +316,7 @@ class BattleScene(Scene):
         # Helper to create a button and append
         def add_move_button(ix, label, handler):
             x = move_start_x + ix * move_gap
-            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, label, on_click=handler))
+            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, label, on_click=handler, button_bg_img=self.button_bg_img))
 
         # Map labels to move indices where possible; fall back to safe indices
         def find_move_index_by_name(name_lower, fallback_idx=0):
@@ -316,6 +342,8 @@ class BattleScene(Scene):
         self.items = self._load_items_from_player()  # list of item dicts: {"name","count","heal"}
         self.item_buttons = []
         self.item_index_selected = -1  # Track which item button was clicked
+        for ix, item in enumerate(self.items):
+            self.item_buttons.append(ItemButton(40, GameSettings.SCREEN_HEIGHT - 150 + ix * 50, 220, 40, ix, f"{item['name']} x{item['count']}", self, font=self.font_med, button_bg_img=self.button_bg_img))
 
         # Message box rect
         self.msg_rect = pg.Rect(20, GameSettings.SCREEN_HEIGHT - 240, GameSettings.SCREEN_WIDTH - 40, 60)
@@ -796,18 +824,18 @@ class BattleScene(Scene):
         # Add scroll up button (top of side panel)
         if self._monster_scroll_offset > 0:
             self.monster_buttons.append(
-                TextButton(side_btn_x, menu_y, side_btn_width, side_btn_height, "UP", on_click=lambda: self._scroll_monsters(-1, party), font=large_font)
+                TextButton(side_btn_x, menu_y, side_btn_width, side_btn_height, "UP", on_click=lambda: self._scroll_monsters(-1, party), font=large_font, button_bg_img=self.button_bg_img)
             )
         
         # Add scroll down button (middle of side panel)
         if end_idx < len(party):
             self.monster_buttons.append(
-                TextButton(side_btn_x, menu_y + side_btn_gap, side_btn_width, side_btn_height, "DN", on_click=lambda: self._scroll_monsters(1, party), font=large_font)
+                TextButton(side_btn_x, menu_y + side_btn_gap, side_btn_width, side_btn_height, "DN", on_click=lambda: self._scroll_monsters(1, party), font=large_font, button_bg_img=self.button_bg_img)
             )
         
         # Add back button (bottom of side panel)
         self.monster_buttons.append(
-            TextButton(side_btn_x, menu_y + side_btn_gap * 2, side_btn_width, side_btn_height, "Back", on_click=self._close_monster_menu, font=large_font)
+            TextButton(side_btn_x, menu_y + side_btn_gap * 2, side_btn_width, side_btn_height, "Back", on_click=self._close_monster_menu, font=large_font, button_bg_img=self.button_bg_img)
         )
         
         for display_idx, i in enumerate(range(start_idx, end_idx)):
@@ -820,7 +848,7 @@ class BattleScene(Scene):
             active_marker = " *" if mon is self.player_mon else ""
             text = f"{name} HP: {hp}/{max_hp}{active_marker}"
             self.monster_buttons.append(
-                TextButton(menu_x, y, monster_btn_width, 36, text, on_click=(lambda i=i: self.switch_monster(i)))
+                TextButton(menu_x, y, monster_btn_width, 36, text, on_click=(lambda i=i: self.switch_monster(i)), button_bg_img=self.button_bg_img)
             )
 
     def _scroll_monsters(self, direction, party):
@@ -937,25 +965,36 @@ class BattleScene(Scene):
         # check faint
         if self.enemy_mon["hp"] <= 0:
             self.enqueue_message(f"{self.enemy_mon['name']} fainted!")
-            # Level up player's Pokemon
+            # Level up player's Pokemon after defeating any Pokemon (wild or trainer)
             self.player_mon["level"] = self.player_mon.get("level", 1) + 1
             self.enqueue_message(f"{self.player_mon['name']} leveled up to level {self.player_mon['level']}!")
+            # Show evolution check result in battle UI
+            pokemon_name_before_evolution = self.player_mon.get('name', '')
+            # Always use the original name for EVOLUTION_DATA lookup
+            from src.utils.encounters import EVOLUTION_DATA
+            evo_data = EVOLUTION_DATA.get(pokemon_name_before_evolution)
+            if evo_data:
+                required_level = evo_data['level']
+                current_level = self.player_mon.get('level', 1)
+                self.enqueue_message(f"Checking evolution for {pokemon_name_before_evolution} at level {current_level} (needs {required_level})")
+            else:
+                self.enqueue_message(f"No evolution data for {pokemon_name_before_evolution}")
             # Check for evolution
-            pokemon_name_before_evolution = self.player_mon['name']
-            if evolve_pokemon(self.player_mon):
-                # Set evolution display
-                self.evolution_display_text = f"{pokemon_name_before_evolution} evolved into {self.player_mon['name']}!"
-                self.evolution_display_timer = 10.0  # Display for 5 seconds
-                self.enqueue_message(f"{pokemon_name_before_evolution} evolved into {self.player_mon['name']}!")
-                # Reload sprite for evolved form
-                self.player_mon["sprite"] = None
-                self._ensure_monster_sprites()
-                # Reload animation frames for the evolved form
-                self.player_idle_frames = self._get_all_frames_from_sheet(self.player_mon, "idle")
-                self.player_attack_frames = self._get_all_frames_from_sheet(self.player_mon, "attack")
-                if self.player_idle_frames:
-                    self.player_idle_sprite = self.player_idle_frames[0]
-            
+            if evo_data and current_level >= required_level:
+                if evolve_pokemon(self.player_mon):
+                    # Set evolution display
+                    self.evolution_display_text = f"{pokemon_name_before_evolution} evolved into {self.player_mon['name']}!"
+                    self.evolution_display_timer = 10.0  # Display for 5 seconds
+                    self.enqueue_message(f"{pokemon_name_before_evolution} evolved into {self.player_mon['name']}!")
+                    # Reload sprite for evolved form
+                    self.player_mon["sprite"] = None
+                    self._ensure_monster_sprites()
+            # Reload animation frames for the evolved form
+            self.player_idle_frames = self._get_all_frames_from_sheet(self.player_mon, "idle")
+            self.player_attack_frames = self._get_all_frames_from_sheet(self.player_mon, "attack")
+            if self.player_idle_frames:
+                self.player_idle_sprite = self.player_idle_frames[0]
+
             # Check if enemy has more monsters
             self.enemy_mon_index += 1
             if self.enemy_mon_index < len(self.enemy_team):
@@ -1343,6 +1382,31 @@ class BattleScene(Scene):
                 b.update(dt)
 
 
+        # Immediately end battle if any Pokemon's HP is zero
+        # Fainting animation trigger
+        if not self.player_fainting and self.player_mon.get("hp", 0) <= 0:
+            self.player_fainting = True
+            self.player_faint_timer = 0.0
+        if not self.enemy_fainting and self.enemy_mon.get("hp", 0) <= 0:
+            self.enemy_fainting = True
+            self.enemy_faint_timer = 0.0
+
+        # Handle fainting animation and end battle after animation
+        if self.player_fainting:
+            self.player_faint_timer += dt
+            if self.player_faint_timer >= self.player_faint_duration:
+                self.player_fainting = False
+                self.enqueue_message(f"{self.player_mon.get('name', 'Your Pokemon')} fainted!", duration=3.0)
+                self._after_battle_end(victory=False)
+            return
+        if self.enemy_fainting:
+            self.enemy_faint_timer += dt
+            if self.enemy_faint_timer >= self.enemy_faint_duration:
+                self.enemy_fainting = False
+                self.enqueue_message(f"{self.enemy_mon.get('name', 'Enemy Pokemon')} fainted!", duration=3.0)
+                self._after_battle_end(victory=True)
+            return
+
         # enemy automatic turn handling
         # If it's enemy's turn and there are no messages pending, perform enemy action
         if self.turn == "enemy" and not self.showing_message:
@@ -1448,43 +1512,73 @@ class BattleScene(Scene):
         # Draw enemy sprite (if available) with animation
         # Don't draw if Pokemon was successfully captured
         if not self.pokemon_captured:
-            enemy_sprite = self._get_current_enemy_sprite()
+            # Only draw enemy if not fainted or if fainting animation is running
+            draw_enemy = True
+            if self.enemy_mon.get("hp", 0) <= 0 and not self.enemy_fainting:
+                draw_enemy = False
+            enemy_sprite = self._get_current_enemy_sprite() if draw_enemy else None
             if enemy_sprite is not None:
                 try:
                     s = enemy_sprite
                     # If capture animation is active, shrink the sprite
                     if self.capture_animation and self.original_enemy_sprite:
-                        progress = self.capture_timer / self.capture_duration
+                        progress = min(1.0, self.capture_timer / self.capture_duration)
                         scale = 1.0 - progress  # Shrink from 1.0 to 0.0
-                        
-                        if scale > 0.05:  # Only draw if not too small
+                        if scale > 0.05:
                             original_rect = s.get_rect()
                             new_width = int(original_rect.width * scale)
                             new_height = int(original_rect.height * scale)
-                            
                             if new_width > 0 and new_height > 0:
                                 shrunk_sprite = pg.transform.scale(s, (new_width, new_height))
-                                # Center the shrinking sprite at ball position
                                 shrunk_rect = shrunk_sprite.get_rect(center=(self.ball_end_pos[0], self.ball_end_pos[1]))
+                                screen.blit(shrunk_sprite, shrunk_rect)
+                    # Fainting animation for enemy
+                    elif self.enemy_fainting:
+                        progress = min(1.0, self.enemy_faint_timer / self.enemy_faint_duration)
+                        scale = 1.0 - progress
+                        if scale > 0.05:
+                            original_rect = s.get_rect()
+                            new_width = int(original_rect.width * scale)
+                            new_height = int(original_rect.height * scale)
+                            if new_width > 0 and new_height > 0:
+                                shrunk_sprite = pg.transform.scale(s, (new_width, new_height))
+                                shrunk_rect = shrunk_sprite.get_rect(center=(self.enemy_pos[0] + s.get_width() // 2, self.enemy_pos[1] + s.get_height() // 2))
                                 screen.blit(shrunk_sprite, shrunk_rect)
                     else:
                         screen.blit(s, self.enemy_pos)
                 except Exception:
                     pass
             else:
-                # Only show placeholder if not during/after capture
-                if not self.capture_animation:
+                # Only show placeholder if not during/after capture and not fainted
+                if not self.capture_animation and self.enemy_mon.get("hp", 0) > 0:
                     # placeholder box
                     pg.draw.rect(screen, (200, 60, 60), pg.Rect(self.enemy_pos[0], self.enemy_pos[1], 300, 300))
                     name_surf = self.font_med.render(self.enemy_mon.get("name", "Enemy"), True, (255, 255, 255))
                     screen.blit(name_surf, (self.enemy_pos[0], self.enemy_pos[1] - 24))
 
         # Draw player sprite with animation
-        player_sprite = self._get_current_player_sprite()
+        # Only draw player if not fainted or if fainting animation is running
+        draw_player = True
+        if self.player_mon.get("hp", 0) <= 0 and not self.player_fainting:
+            draw_player = False
+        player_sprite = self._get_current_player_sprite() if draw_player else None
         if player_sprite is not None:
             try:
                 s = player_sprite
-                screen.blit(s, self.player_pos)
+                # Fainting animation for player
+                if self.player_fainting:
+                    progress = min(1.0, self.player_faint_timer / self.player_faint_duration)
+                    scale = 1.0 - progress
+                    if scale > 0.05:
+                        original_rect = s.get_rect()
+                        new_width = int(original_rect.width * scale)
+                        new_height = int(original_rect.height * scale)
+                        if new_width > 0 and new_height > 0:
+                            shrunk_sprite = pg.transform.scale(s, (new_width, new_height))
+                            shrunk_rect = shrunk_sprite.get_rect(center=(self.player_pos[0] + s.get_width() // 2, self.player_pos[1] + s.get_height() // 2))
+                            screen.blit(shrunk_sprite, shrunk_rect)
+                else:
+                    screen.blit(s, self.player_pos)
             except Exception:
                 pass
         else:
