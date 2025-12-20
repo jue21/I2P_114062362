@@ -1,4 +1,4 @@
-# src/utils/encounters.py
+
 import random
 import pygame as pg
 from pathlib import Path
@@ -14,7 +14,7 @@ EVOLUTION_DATA = {
     "Charmeleon": {"evolved_form": "Charizard", "level": 36, "sprite_path": "menu_sprites/menusprite9.png", "stat_mult": {"hp": 2.6, "max_hp": 2.6}},
     "Squirtle": {"evolved_form": "Wartortle", "level": 16, "sprite_path": "menu_sprites/menusprite13.png", "stat_mult": {"hp": 1.4, "max_hp": 1.4}},
     "Wartortle": {"evolved_form": "Blastoise", "level": 36, "sprite_path": "menu_sprites/menusprite14.png", "stat_mult": {"hp": 2.0, "max_hp": 2.0}},
-    "Pichu": {"evolved_form": "Pikachu", "level": 20, "sprite_path": "menu_sprites/menusprite16.png", "stat_mult": {"hp": 2.4, "max_hp": 2.4}},
+    "Bug": {"evolved_form": "Beetle", "level": 20, "sprite_path": "menu_sprites/menusprite16.png", "stat_mult": {"hp": 2.4, "max_hp": 2.4}},
 }
 
 def evolve_pokemon(pokemon: dict) -> bool:
@@ -66,8 +66,8 @@ def generate_random_monster() -> dict:
         {"name": "Blastoise",  "hp": 120, "max_hp": 180, "level": 40, "sprite_path": "menu_sprites/menusprite14.png", "element": "Water", "evolved_form": "", "evolution_level": 0},
         
         # Pikachu line (menusprite 15, 16)
-        {"name": "Pichu",      "hp": 35,  "max_hp": 50,  "level": 30, "sprite_path": "menu_sprites/menusprite15.png", "element": "Electric", "evolved_form": "Pikachu", "evolution_level": 20},
-        {"name": "Pikachu",    "hp": 85,  "max_hp": 100, "level": 40, "sprite_path": "menu_sprites/menusprite16.png", "element": "Electric", "evolved_form": "", "evolution_level": 0},
+        {"name": "Bug",      "hp": 35,  "max_hp": 50,  "level": 30, "sprite_path": "menu_sprites/menusprite15.png", "element": "Electric", "evolved_form": "Beetle", "evolution_level": 20},
+        {"name": "Beetle",    "hp": 85,  "max_hp": 100, "level": 40, "sprite_path": "menu_sprites/menusprite16.png", "element": "Electric", "evolved_form": "", "evolution_level": 0},
         
         # Other available sprites (4, 5, 6, 10, 11)
         {"name": "Capybara",   "hp": 45,  "max_hp": 60,  "level": 5, "sprite_path": "menu_sprites/menusprite4.png", "element": "Ground", "evolved_form": "", "evolution_level": 0},

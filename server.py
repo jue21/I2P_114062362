@@ -14,6 +14,40 @@ PLAYER_HANDLER = PlayerHandler()
 PLAYER_HANDLER.start()
 
 # ------------------------------
+# Battle Challenge Storage
+# ------------------------------
+class BattleChallengeStore:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pending_challenges: Dict[int, dict] = {}  # target_id -> challenge info
+
+    def add_challenge(self, from_id: int, to_id: int, monster_data: dict = None) -> dict:
+        with self._lock:
+            challenge = {
+                "from": from_id,
+                "to": to_id,
+                "timestamp": time.time(),
+                "challenger_monster": monster_data  # Store challenger's monster data
+            }
+            self._pending_challenges[to_id] = challenge
+            return challenge
+
+    def get_challenge(self, to_id: int) -> dict | None:
+        with self._lock:
+            return self._pending_challenges.get(to_id)
+
+    def remove_challenge(self, to_id: int) -> None:
+        with self._lock:
+            if to_id in self._pending_challenges:
+                del self._pending_challenges[to_id]
+
+BATTLE_CHALLENGES = BattleChallengeStore()
+
+# Map player_id to websocket for direct messaging
+PLAYER_WEBSOCKETS: Dict[int, Any] = {}
+PLAYER_WS_LOCK = asyncio.Lock()
+
+# ------------------------------
 # Simple in-memory chat storage
 # ------------------------------
 class ChatStore:
@@ -98,6 +132,11 @@ async def handle_client(websocket: Any):
     try:
         # Register player on connection - server assigns ID
         player_id = PLAYER_HANDLER.register()
+        
+        # Store websocket for direct messaging
+        async with PLAYER_WS_LOCK:
+            PLAYER_WEBSOCKETS[player_id] = websocket
+        
         await websocket.send(json.dumps({
             "type": "registered",
             "id": player_id
@@ -134,6 +173,87 @@ async def handle_client(websocket: Any):
                     
                     # Use the server-assigned player_id, not client-provided
                     PLAYER_HANDLER.update(player_id, x, y, map_name, direction, is_moving)
+                
+                elif msg_type == "battle_challenge":
+                    # Player is challenging another player to battle
+                    target_id = int(data.get("target_id", -1))
+                    monster_data = data.get("monster_data", None)  # Challenger's monster
+                    monster_name = monster_data.get('name', 'None') if monster_data else 'None'
+                    print(f"[SERVER] battle_challenge: player {player_id} challenges {target_id}, monster: {monster_name}")
+                    if target_id >= 0 and target_id != player_id:
+                        BATTLE_CHALLENGES.add_challenge(player_id, target_id, monster_data)
+                        # Send challenge notification to target player with challenger's monster
+                        challenge_msg = json.dumps({
+                            "type": "battle_challenge_received",
+                            "from": player_id,
+                            "opponent_monster": monster_data
+                        })
+                        async with PLAYER_WS_LOCK:
+                            target_ws = PLAYER_WEBSOCKETS.get(target_id)
+                            if target_ws:
+                                try:
+                                    await target_ws.send(challenge_msg)
+                                    print(f"[SERVER] Sent challenge to player {target_id}")
+                                except Exception as e:
+                                    print(f"[SERVER] Failed to send challenge: {e}")
+                
+                elif msg_type == "battle_accept":
+                    # Player accepts a battle challenge
+                    challenger_id = int(data.get("challenger_id", -1))
+                    accepter_monster = data.get("monster_data", None)  # Accepter's monster
+                    accepter_name = accepter_monster.get('name', 'None') if accepter_monster else 'None'
+                    print(f"[SERVER] battle_accept: player {player_id} accepts from {challenger_id}, their monster: {accepter_name}")
+                    if challenger_id >= 0:
+                        print(f"[SERVER DEBUG] Preparing to send battle_start to challenger {challenger_id} and accepter {player_id}")
+                        # Get challenger's monster from stored challenge
+                        challenge = BATTLE_CHALLENGES.get_challenge(player_id)
+                        challenger_monster = challenge.get("challenger_monster") if challenge else None
+                        challenger_name = challenger_monster.get('name', 'None') if challenger_monster else 'None'
+                        print(f"[SERVER] Retrieved stored challenger monster: {challenger_name}")
+                        BATTLE_CHALLENGES.remove_challenge(player_id)
+                        # Notify both players to start battle with opponent's monster data
+                        start_msg_challenger = json.dumps({
+                            "type": "battle_start",
+                            "opponent_id": player_id,
+                            "opponent_monster": accepter_monster  # Challenger receives accepter's monster
+                        })
+                        start_msg_accepter = json.dumps({
+                            "type": "battle_start",
+                            "opponent_id": challenger_id,
+                            "opponent_monster": challenger_monster  # Accepter receives challenger's monster
+                        })
+                        print(f"[SERVER] Sending battle_start to challenger {challenger_id} with monster: {accepter_name}")
+                        print(f"[SERVER] Sending battle_start to accepter {player_id} with monster: {challenger_name}")
+                        async with PLAYER_WS_LOCK:
+                            challenger_ws = PLAYER_WEBSOCKETS.get(challenger_id)
+                            if challenger_ws:
+                                try:
+                                    await challenger_ws.send(start_msg_challenger)
+                                except Exception as e:
+                                    print(f"[SERVER] Failed to send to challenger: {e}")
+                            # Also confirm to the accepter
+                            try:
+                                await websocket.send(start_msg_accepter)
+                            except Exception as e:
+                                print(f"[SERVER] Failed to send to accepter: {e}")
+                
+                elif msg_type == "battle_decline":
+                    # Player declines a battle challenge
+                    challenger_id = int(data.get("challenger_id", -1))
+                    if challenger_id >= 0:
+                        BATTLE_CHALLENGES.remove_challenge(player_id)
+                        # Notify challenger that battle was declined
+                        decline_msg = json.dumps({
+                            "type": "battle_declined",
+                            "by": player_id
+                        })
+                        async with PLAYER_WS_LOCK:
+                            challenger_ws = PLAYER_WEBSOCKETS.get(challenger_id)
+                            if challenger_ws:
+                                try:
+                                    await challenger_ws.send(decline_msg)
+                                except Exception:
+                                    pass
                     
                 elif msg_type == "chat_send":
                     # Send chat message - use server-assigned ID
@@ -178,6 +298,10 @@ async def handle_client(websocket: Any):
         # Unregister player on disconnect
         if player_id >= 0:
             PLAYER_HANDLER.unregister(player_id)
+            BATTLE_CHALLENGES.remove_challenge(player_id)
+        async with PLAYER_WS_LOCK:
+            if player_id in PLAYER_WEBSOCKETS:
+                del PLAYER_WEBSOCKETS[player_id]
         async with CLIENTS_LOCK:
             CONNECTED_CLIENTS.discard(websocket)
 

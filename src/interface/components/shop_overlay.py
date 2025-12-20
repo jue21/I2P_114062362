@@ -1,4 +1,5 @@
 import pygame as pg
+import time
 from src.utils import GameSettings
 from src.interface.components import Button
 from src.core.services import resource_manager
@@ -88,6 +89,8 @@ class ShopOverlay:
         # Selected item for purchase/sale
         self.selected_item_index = None
         self.quantity_input = ""
+        # Prevent duplicate rapid purchases
+        self._last_buy_time = 0.0
         
         # Buy button rects for item purchase
         self.buy_item_buttons = []  # List of Button objects
@@ -243,7 +246,7 @@ class ShopOverlay:
             # Check item selection in items area
             if self.items_area_rect.collidepoint(event.pos):
                 items = self.get_items_list()
-                item_height = 40
+                item_height = 50
                 clicked_index = (event.pos[1] - self.items_area_rect.y + self.scroll_offset) // item_height
                 if 0 <= clicked_index < len(items):
                     self.selected_item_index = clicked_index
@@ -262,7 +265,14 @@ class ShopOverlay:
         elif event.type == pg.MOUSEWHEEL:
             # Handle scrolling
             self.scroll_offset -= event.y * self.scroll_speed
-            self.scroll_offset = max(0, self.scroll_offset)
+            # clamp scroll to available items
+            items = self.get_items_list()
+            item_height = 50
+            max_scroll = max(0, len(items) * item_height - self.items_area_rect.height)
+            if self.scroll_offset < 0:
+                self.scroll_offset = 0
+            if self.scroll_offset > max_scroll:
+                self.scroll_offset = max_scroll
             # Update button positions after scrolling
             self._update_buy_button_positions()
     
@@ -338,6 +348,11 @@ class ShopOverlay:
     
     def _execute_buy(self, item: dict, quantity: int) -> None:
         """Handle buying an item."""
+        # Prevent duplicate rapid buys from double-clicks
+        now = time.time()
+        if now - self._last_buy_time < 0.25:
+            return
+        self._last_buy_time = now
         total_cost = item.get("price", 0) * quantity
         
         # Check if shopkeeper has enough items
@@ -548,16 +563,23 @@ class ShopOverlay:
         pg.draw.rect(screen, (255, 215, 0), self.items_area_rect)
         pg.draw.rect(screen, (200, 120, 0), self.items_area_rect, 1)
         
-        # Draw items
+        # Draw items (clip to items area to avoid drawing outside box)
         y_offset = self.items_area_rect.y
+        prev_clip = screen.get_clip()
+        screen.set_clip(self.items_area_rect)
         for idx, item in enumerate(items):
             item_y = y_offset + (idx * item_height) - self.scroll_offset
-            
-            # Only draw if visible
-            if item_y < self.items_area_rect.y - item_height:
+
+            # Default visibility: draw if any part is visible
+            if item_y + item_height < self.items_area_rect.y:
                 continue
             if item_y > self.items_area_rect.bottom:
-                break
+                continue
+
+            # For monster rows, require the whole row to be inside the items area
+            if self.current_tab == "sell_monsters":
+                if item_y < self.items_area_rect.y or (item_y + item_height) > self.items_area_rect.bottom:
+                    continue
             
             # Highlight selected item with gold color
             if idx == self.selected_item_index:
@@ -615,6 +637,8 @@ class ShopOverlay:
                 button.hitbox.x = self.items_area_rect.right - 50
                 button.hitbox.y = item_y + 8
                 button.draw(screen)
+        # restore clip after drawing all items
+        screen.set_clip(prev_clip)
     
     def _draw_item_details(self, screen: pg.Surface) -> None:
         """Draw details of the selected item."""

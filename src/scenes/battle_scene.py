@@ -278,16 +278,40 @@ class BattleScene(Scene):
             TextButton(menu_start_x + 3 * gap, menu_y, menu_w, menu_h, "RUN", on_click=self.attempt_run),
         ]
 
-        # Fight menu move buttons (reused when in fight submenu) - horizontal layout
+        # Fight menu move buttons (5 buttons): Quick Hit, Growl, Bash, Power, Tackle
         self.move_buttons = []
-        move_btn_w = 150
+        move_btn_w = 140
         move_gap = 160  # Horizontal gap between buttons
-        move_total_width = 4 * move_btn_w + 3 * (move_gap - move_btn_w)
+        num_move_buttons = 5
+        move_total_width = num_move_buttons * move_btn_w + (num_move_buttons - 1) * (move_gap - move_btn_w)
         move_start_x = (sw - move_total_width) // 2  # Center horizontally
         move_menu_y = sh - 100  # Same y position as main buttons
-        for i in range(4):
-            x = move_start_x + i * move_gap
-            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, self.player_moves[i]["name"], on_click=(lambda i=i: self.player_use_move(i))))
+
+        # Helper to create a button and append
+        def add_move_button(ix, label, handler):
+            x = move_start_x + ix * move_gap
+            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, label, on_click=handler))
+
+        # Map labels to move indices where possible; fall back to safe indices
+        def find_move_index_by_name(name_lower, fallback_idx=0):
+            for i, m in enumerate(self.player_moves):
+                try:
+                    if m.get("name", "").lower() == name_lower:
+                        return i
+                except Exception:
+                    continue
+            return fallback_idx
+
+        # Quick Hit -> player move named 'Quick Hit' if present
+        add_move_button(0, "Quick Hit", lambda: self.player_use_move(find_move_index_by_name("quick hit", 0)))
+        # Growl
+        add_move_button(1, "Growl", lambda: self.player_use_move(find_move_index_by_name("growl", 1)))
+        # Bash
+        add_move_button(2, "Bash", lambda: self.player_use_move(find_move_index_by_name("bash", 2)))
+        # Power (special)
+        add_move_button(3, "POWER", self.player_use_power)
+        # Tackle
+        add_move_button(4, "Tackle", lambda: self.player_use_move(find_move_index_by_name("tackle", 0)))
         # Bag & monsters minimal placeholders (will show dialog)
         self.items = self._load_items_from_player()  # list of item dicts: {"name","count","heal"}
         self.item_buttons = []
@@ -298,6 +322,40 @@ class BattleScene(Scene):
 
         # small cooldown so enemy turn doesn't instantly trigger while clicking
         self._time_since_action = 0.0
+
+        # Healing animation state (uses assets/images/attack/attack6.png as a 4-frame sheet)
+        try:
+            heal_sheet_path = str(Path("assets") / "images" / "attack" / "attack6.png")
+            heal_sheet = pg.image.load(heal_sheet_path).convert_alpha()
+            self.heal_anim_frames = [self._extract_sprite_frame(heal_sheet, i) for i in range(4)]
+        except Exception:
+            self.heal_anim_frames = []
+        self.healing_animation = False
+        self.heal_anim_timer = 0.0
+        self.heal_anim_duration = 0.8  # seconds total for heal animation
+        # Power attack animation sheets: water (attack1/3) and fire (attack4/5)
+        try:
+            power1_path = str(Path("assets") / "images" / "attack" / "attack1.png")
+            power3_path = str(Path("assets") / "images" / "attack" / "attack3.png")
+            power4_path = str(Path("assets") / "images" / "attack" / "attack4.png")
+            power5_path = str(Path("assets") / "images" / "attack" / "attack5.png")
+            p1 = pg.image.load(power1_path).convert_alpha()
+            p3 = pg.image.load(power3_path).convert_alpha()
+            p4 = pg.image.load(power4_path).convert_alpha()
+            p5 = pg.image.load(power5_path).convert_alpha()
+            self.power1_frames = [self._extract_sprite_frame(p1, i) for i in range(4)]
+            self.power3_frames = [self._extract_sprite_frame(p3, i) for i in range(4)]
+            self.power4_frames = [self._extract_sprite_frame(p4, i) for i in range(4)]
+            self.power5_frames = [self._extract_sprite_frame(p5, i) for i in range(4)]
+        except Exception:
+            self.power1_frames = []
+            self.power3_frames = []
+            self.power4_frames = []
+            self.power5_frames = []
+        self.power_anim_active = False
+        self.power_anim_timer = 0.0
+        self.power_anim_duration = 0.8
+        self.power_anim_frames = []
 
     def _load_items_from_player(self):
         # First try to load items from the bag if available
@@ -351,17 +409,33 @@ class BattleScene(Scene):
         """Rebuild move buttons for the current player monster."""
         sw, sh = GameSettings.SCREEN_WIDTH, GameSettings.SCREEN_HEIGHT
         menu_h = 40
-        move_btn_w = 150
+        move_btn_w = 140
         move_gap = 160
-        move_total_width = 4 * move_btn_w + 3 * (move_gap - move_btn_w)
+        num_move_buttons = 5
+        move_total_width = num_move_buttons * move_btn_w + (num_move_buttons - 1) * (move_gap - move_btn_w)
         move_start_x = (sw - move_total_width) // 2
         move_menu_y = sh - 100
-        
+
         self.move_buttons = []
-        for i in range(4):
-            x = move_start_x + i * move_gap
-            move_name = self.player_moves[i]["name"] if i < len(self.player_moves) else "---"
-            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, move_name, on_click=(lambda i=i: self.player_use_move(i))))
+
+        def add_move_button(ix, label, handler):
+            x = move_start_x + ix * move_gap
+            self.move_buttons.append(TextButton(x, move_menu_y, move_btn_w, menu_h, label, on_click=handler))
+
+        def find_move_index_by_name(name_lower, fallback_idx=0):
+            for i, m in enumerate(self.player_moves):
+                try:
+                    if m.get("name", "").lower() == name_lower:
+                        return i
+                except Exception:
+                    continue
+            return fallback_idx
+
+        add_move_button(0, "Quick Hit", lambda: self.player_use_move(find_move_index_by_name("quick hit", 0)))
+        add_move_button(1, "Growl", lambda: self.player_use_move(find_move_index_by_name("growl", 1)))
+        add_move_button(2, "Bash", lambda: self.player_use_move(find_move_index_by_name("bash", 2)))
+        add_move_button(3, "POWER", self.player_use_power)
+        add_move_button(4, "Tackle", lambda: self.player_use_move(find_move_index_by_name("tackle", 0)))
     
 
     def enqueue_message(self, msg: str, duration: Optional[float] = None):
@@ -625,8 +699,8 @@ class BattleScene(Scene):
         self._time_since_action = 0.0  # Reset cooldown
         # refresh move names (in case moves changed)
         self.player_moves = safe_get_moves(self.player_mon)
-        for i, btn in enumerate(self.move_buttons):
-            btn.text = self.player_moves[i]["name"]
+        # Rebuild move buttons to reflect current moves / POWER button
+        self._rebuild_move_buttons()
 
     def open_bag(self):
         if self.turn != "player":
@@ -645,20 +719,22 @@ class BattleScene(Scene):
         gap = 46
         # Filter out non-battle items (those with null item_type or specific exclusions)
         usable_items = [it for it in self.items if it.get("item_type") is not None]
-        
-        # Create buttons in 2 columns: left column (4 items), right column (2 items)
-        for i, it in enumerate(usable_items):
+        max_buttons = 7
+        # Fill extra slots with Super Potion if less than max_buttons
+        while len(usable_items) < max_buttons:
+            usable_items.append({"name": "Super Potion", "count": 0, "item_type": "heal"})
+        # Create buttons in 2 columns: left column (4 items), right column (3 items)
+        for i, it in enumerate(usable_items[:max_buttons]):
             if i < 4:
                 # Left column
                 x = menu_x
                 y = menu_y + i * gap
-            elif i < 6:
-                # Right column (2 items starting after the 4 left items)
+            else:
+                # Right column (3 items starting after the 4 left items)
                 x = menu_x + menu_w + 10
                 y = menu_y + (i - 4) * gap
-            else:
-                break  # Only show up to 6 buttons
-            self.item_buttons.append(ItemButton(x, y, menu_w, 40, self.items.index(it), f"{it['name']} x{it['count']}", self))
+            idx = self.items.index(it) if it in self.items else -1
+            self.item_buttons.append(ItemButton(x, y, menu_w, 40, idx, f"{it['name']} x{it['count']}", self))
 
     def open_monsters(self):
         if self.turn != "player":
@@ -903,6 +979,53 @@ class BattleScene(Scene):
                 # All enemy monsters defeated
                 self._after_battle_end(victory=True)
 
+    def player_use_power(self):
+        """Special POWER action available for Water-type player Pokémon.
+        Plays a 4-frame animated effect chosen randomly from attack1 or attack3.
+        """
+        if self.turn != "player":
+            return
+        if self._time_since_action < 0.2:
+            return
+        # Select power frames based on player's element (Fire/Water)
+        elem = str(self.player_mon.get("element", "")).strip().lower()
+        choices = []
+        # Fire-type -> use attack4/attack5
+        if elem == "fire":
+            if getattr(self, 'power4_frames', None):
+                choices.append(self.power4_frames)
+            if getattr(self, 'power5_frames', None):
+                choices.append(self.power5_frames)
+        # Water-type -> use attack1/attack3
+        elif elem == "water":
+            if getattr(self, 'power1_frames', None):
+                choices.append(self.power1_frames)
+            if getattr(self, 'power3_frames', None):
+                choices.append(self.power3_frames)
+        else:
+            # Fallback: include any available power frames
+            for attr in ('power1_frames','power3_frames','power4_frames','power5_frames'):
+                if getattr(self, attr, None):
+                    choices.append(getattr(self, attr))
+
+        if not choices:
+            # nothing to show; just skip
+            self.enqueue_message("Used POWER! (no visual available)")
+            self.turn = "enemy"
+            self._time_since_action = 0.0
+            return
+        import random as _r
+        self.power_anim_frames = _r.choice(choices)
+        self.power_anim_active = True
+        self.power_anim_timer = 0.0
+        # Apply damage: fixed 30, include player's attack boost
+        dmg = int(30 * self.player_attack_boost)
+        self.enemy_mon["hp"] = max(0, int(self.enemy_mon.get("hp", 0) - dmg))
+        self.enqueue_message(f"{self.player_mon.get('name','Your Pokemon')} used POWER! It dealt {dmg} damage.")
+        # set to anim so enemy doesn't act until finished
+        self.turn = "anim"
+        self._time_since_action = 0.0
+
     def enemy_use_move(self):
         move = random.choice(self.enemy_moves) if self.enemy_moves else {"name": "Scratch", "power": 6}
         name = move["name"]
@@ -1000,16 +1123,27 @@ class BattleScene(Scene):
 
     # ----- Handle Heal Potion -----
         if item_type == "heal":
-            heal = 30  # Heal Potion heals 30 HP
+            # Super Potion: stronger heal and extra defense boost
+            if "super" in item_name:
+                heal = 60
+                # Make Super Potion also grant a strong defense boost (double the normal defense potion)
+                self.player_defense_boost = 3.0
+            else:
+                heal = 30  # Heal Potion heals 30 HP
+
             old_hp = self.player_mon.get("hp", 0)
             self.player_mon["hp"] = min(self.player_mon.get("max_hp", 999), old_hp + heal)
             actual_heal = self.player_mon["hp"] - old_hp
             item["count"] -= 1
             # Update original bag item count
             self._update_bag_item_count(item["name"], -1)
-            self.enqueue_message(f"Used {item['name']}! Restored {actual_heal} HP.")
+            # Start heal animation; delay enemy turn until animation completes
+            self.healing_animation = True
+            self.heal_anim_timer = 0.0
+            extra = " Defense increased!" if "super" in item_name else ""
+            self.enqueue_message(f"Used {item['name']}! Restored {actual_heal} HP.{extra}")
             self.submenu = "main"
-            self.turn = "enemy"
+            self.turn = "anim"
 
     # ----- Handle Strength Potion -----
         elif item_type == "strength":
@@ -1023,7 +1157,8 @@ class BattleScene(Scene):
 
     # ----- Handle Defense Potion -----
         elif item_type == "defense":
-            self.player_defense_boost = 1.5  # 50% damage reduction
+            # Double the previous defense potion effect: stronger reduction
+            self.player_defense_boost = 1.5  # stronger damage reduction
             item["count"] -= 1
             # Update original bag item count
             self._update_bag_item_count(item["name"], -1)
@@ -1159,6 +1294,23 @@ class BattleScene(Scene):
                 self.ball_sprite_throw = None
                 self.original_enemy_sprite = None
             return  # Skip other updates during animation
+
+        # Update heal animation
+        if getattr(self, 'healing_animation', False):
+            self.heal_anim_timer += dt
+            if self.heal_anim_timer >= self.heal_anim_duration:
+                self.healing_animation = False
+                self.heal_anim_timer = 0.0
+                # After heal animation finishes, proceed to enemy turn
+                self.turn = "enemy"
+        # Update power animation
+        if getattr(self, 'power_anim_active', False):
+            self.power_anim_timer += dt
+            if self.power_anim_timer >= self.power_anim_duration:
+                self.power_anim_active = False
+                self.power_anim_timer = 0.0
+                # After power animation finishes, proceed to enemy turn
+                self.turn = "enemy"
         
         if self.showing_message:
     # countdown timer
@@ -1340,8 +1492,41 @@ class BattleScene(Scene):
             name_surf = self.font_med.render(self.player_mon.get("name", "Player"), True, (255, 255, 255))
             screen.blit(name_surf, (self.player_pos[0], self.player_pos[1] - 24))
 
+        # Healing animation overlay (draw over player)
+        if getattr(self, 'healing_animation', False):
+            if getattr(self, 'heal_anim_frames', None):
+                progress = min(1.0, self.heal_anim_timer / max(1e-6, self.heal_anim_duration))
+                frame_idx = min(len(self.heal_anim_frames) - 1, int(progress * len(self.heal_anim_frames)))
+                heal_img = self.heal_anim_frames[frame_idx].copy()
+                alpha = int(255 * (1 - progress))
+                heal_img.fill((255, 255, 255, alpha), special_flags=pg.BLEND_RGBA_MULT)
+                heal_rect = heal_img.get_rect(center=(self.player_pos[0] + 150, self.player_pos[1] + 150))
+                screen.blit(heal_img, heal_rect)
+            else:
+                heal_overlay = pg.Surface((300, 300), pg.SRCALPHA)
+                alpha = int(180 * (1 - (self.heal_anim_timer / max(1e-6, self.heal_anim_duration))))
+                heal_overlay.fill((80, 255, 80, alpha))
+                screen.blit(heal_overlay, self.player_pos)
+
+        # Power animation overlay (draw over enemy)
+        if getattr(self, 'power_anim_active', False):
+            if getattr(self, 'power_anim_frames', None):
+                prog = min(1.0, self.power_anim_timer / max(1e-6, self.power_anim_duration))
+                idx = min(len(self.power_anim_frames) - 1, int(prog * len(self.power_anim_frames)))
+                img = self.power_anim_frames[idx].copy()
+                alpha = int(255 * (1 - prog))
+                img.fill((255, 255, 255, alpha), special_flags=pg.BLEND_RGBA_MULT)
+                rect = img.get_rect(center=(self.enemy_pos[0] + 150, self.enemy_pos[1] + 150))
+                screen.blit(img, rect)
+            else:
+                overlay = pg.Surface((300, 300), pg.SRCALPHA)
+                alpha = int(180 * (1 - (self.power_anim_timer / max(1e-6, self.power_anim_duration))))
+                overlay.fill((100, 180, 255, alpha))
+                screen.blit(overlay, self.enemy_pos)
+
         # Draw Pokemon info banners with name, element, and HP bar
         # Player Pokemon banner (bottom-left, near the player sprite)
+
         self._draw_pokemon_info_banner(screen, self.player_mon, 20, 10, is_player=True)
         
         # Enemy Pokemon banner (top-right, near the enemy sprite)

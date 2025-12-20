@@ -69,20 +69,30 @@
       ],
       "shopkeepers": [
         {
-          "x": 7.0,
-          "y": 10.0,
+          "x": 51.0,
+          "y": 31.0,
           "name": "Poke Mart Clerk",
           "facing": "DOWN",
           "shop_items": [
             {
-              "name": "Potion",
+              "name": "Heal Potion",
               "price": 5,
-              "count": 7
+              "count": 4
+            },
+            {
+              "name": "Strength Potion",
+              "price": 12,
+              "count": 4
+            },
+            {
+              "name": "Defense Potion",
+              "price": 12,
+              "count": 4
             },
             {
               "name": "Super Potion",
               "price": 10,
-              "count": 4
+              "count": 10
             },
             {
               "name": "Pokeball",
@@ -133,50 +143,46 @@
     {
       "path": "tile1.tmx",
       "teleport": [
+        { "x": 28, "y": 8, "destination": "map.tmx" },
+        { "x": 28, "y": 9, "destination": "map.tmx" },
+        { "x": 28, "y": 10, "destination": "map.tmx" },
+        { "x": 28, "y": 11, "destination": "map.tmx" },
+        { "x": 28, "y": 12, "destination": "map.tmx" }
+      ],
+      "player": { "x": 28, "y": 10 },
+      "enemy_trainers": [
         {
-          "x": 28,
-          "y": 8,
-          "destination": "map.tmx"
+          "x": 3.0,
+          "y": 10.0,
+          "classification": "stationary",
+          "facing": "DOWN",
+          "max_tiles": 2,
+          "name": "TrainerA",
+          "sprite_path": "character/ow2.png"
         },
         {
-          "x": 28,
-          "y": 9,
-          "destination": "map.tmx"
-        },
-        {
-          "x": 28,
-          "y": 10,
-          "destination": "map.tmx"
-        },
-        {
-          "x": 28,
-          "y": 11,
-          "destination": "map.tmx"
-        },
-        {
-          "x": 28,
-          "y": 12,
-          "destination": "map.tmx"
+          "x": 20.0,
+          "y": 8.0,
+          "classification": "stationary",
+          "facing": "LEFT",
+          "max_tiles": 2,
+          "name": "TrainerB",
+          "sprite_path": "character/ow3.png"
         }
       ],
-      "player": {
-        "x": 28,
-        "y": 10
-      },
-      "enemy_trainers": [],
       "shopkeepers": []
     }
   ],
   "current_map": "map.tmx",
   "player": {
-    "x": 7.0,
-    "y": 19.238871283174372
+    "x": 49.1664909012064,
+    "y": 30.47442294066421
   },
   "bag": {
     "monsters": [
       {
-        "name": "Pikachu",
-        "hp": 39,
+        "name": "Beetle",
+        "hp": 129,
         "max_hp": 180,
         "level": 26,
         "sprite_path": "menu_sprites/menusprite16.png",
@@ -235,13 +241,13 @@
         "evolution_level": 0
       },
       {
-        "name": "Pichu",
+        "name": "Bug",
         "hp": 35,
         "max_hp": 50,
         "level": 2,
         "sprite_path": "menu_sprites/menusprite15.png",
         "element": "Electric",
-        "evolved_form": "Pikachu",
+        "evolved_form": "Beetle",
         "evolution_level": 20
       },
       {
@@ -295,7 +301,7 @@
         "evolution_level": 0
       },
       {
-        "name": "Pikachu",
+        "name": "Beetle",
         "hp": 13,
         "max_hp": 100,
         "level": 40,
@@ -318,7 +324,7 @@
     "items": [
       {
         "name": "Heal Potion",
-        "count": 5,
+        "count": 4,
         "sprite_path": "ingame_ui/potion.png",
         "item_type": "heal"
       },
@@ -336,7 +342,7 @@
       },
       {
         "name": "Coins",
-        "count": 2295,
+        "count": 2240,
         "sprite_path": "ingame_ui/coin.png",
         "item_type": null
       },
@@ -355,6 +361,11 @@
       {
         "name": "Pokeball",
         "count": 5,
+        "sprite_path": ""
+      },
+      {
+        "name": "Super Potion",
+        "count": 4,
         "sprite_path": ""
       }
     ]

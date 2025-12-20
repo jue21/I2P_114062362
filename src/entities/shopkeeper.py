@@ -33,7 +33,9 @@ class Shopkeeper(Entity):
         
         # Default shop items: name and price
         self.shop_items = shop_items or [
-            {"name": "Potion", "price": 5, "count": 10},
+            {"name": "Heal Potion", "price": 5, "count": 10},
+            {"name": "Strength Potion", "price": 12, "count": 6},
+            {"name": "Defense Potion", "price": 12, "count": 6},
             {"name": "Super Potion", "price": 10, "count": 5},
             {"name": "Pokéball", "price": 20, "count": 15},
             {"name": "Great Ball", "price": 60, "count": 8},

@@ -2,6 +2,7 @@ import pygame as pg
 import threading
 import time
 import math
+from pathlib import Path
 
 from src.scenes.scene import Scene
 from src.core import GameManager, OnlineManager
@@ -305,6 +306,58 @@ class GameScene(Scene):
         self.pokemon_follower = None  # Will be set when player selects a monster to follow
         self._follow_button_rects = {}  # Initialize follow button rects
 
+        # --- Online Battle Dialog ---
+        self.online_battle_dialog_open = False
+        self.online_battle_target_id = None  # Player ID of the online player to battle
+        self._online_battle_dialog_font = pg.font.Font("assets/fonts/Minecraft.ttf", 20)
+        self._online_battle_title_font = pg.font.Font("assets/fonts/Minecraft.ttf", 24)
+        # Dialog box dimensions
+        dialog_w, dialog_h = 400, 150
+        self.online_battle_dialog_rect = pg.Rect(
+            (sw - dialog_w) // 2, (sh - dialog_h) // 2, dialog_w, dialog_h
+        )
+        # Yes/No button dimensions and positions
+        btn_w, btn_h = 100, 40
+        btn_y = self.online_battle_dialog_rect.y + self.online_battle_dialog_rect.height - btn_h - 20
+        self.online_battle_yes_rect = pg.Rect(
+            self.online_battle_dialog_rect.x + 60, btn_y, btn_w, btn_h
+        )
+        self.online_battle_no_rect = pg.Rect(
+            self.online_battle_dialog_rect.right - 60 - btn_w, btn_y, btn_w, btn_h
+        )
+        
+        # --- Incoming Challenge Dialog ---
+        self.incoming_challenge_open = False
+        self.incoming_challenge_from_id = -1  # Player ID who challenged us
+        self.incoming_challenge_opponent_monster = None  # Monster data from challenger
+        # Reuse same dialog dimensions for incoming challenge
+        self.incoming_challenge_dialog_rect = pg.Rect(
+            (sw - dialog_w) // 2, (sh - dialog_h) // 2, dialog_w, dialog_h
+        )
+        self.incoming_challenge_yes_rect = pg.Rect(
+            self.incoming_challenge_dialog_rect.x + 60, btn_y, btn_w, btn_h
+        )
+        self.incoming_challenge_no_rect = pg.Rect(
+            self.incoming_challenge_dialog_rect.right - 60 - btn_w, btn_y, btn_w, btn_h
+        )
+        
+        # --- Challenge Status ---
+        self.waiting_for_challenge_response = False  # True when we sent a challenge and waiting
+        self.challenge_declined_message_timer = 0.0  # Timer to show "Challenge declined" message
+
+        # --- Loading animation shown when entering the scene ---
+        self.show_loading = False
+        self.loading_duration = 3.0  # seconds
+        self.loading_timer = 0.0
+        self._loading_angle = 0.0
+        self.loading_ball_sprite = None
+        try:
+            ball_path = str(Path("assets") / "images" / "ingame_ui" / "ball.png")
+            ball_img = pg.image.load(ball_path).convert_alpha()
+            self.loading_ball_sprite = pg.transform.scale(ball_img, (96, 96))
+        except Exception:
+            self.loading_ball_sprite = None
+
     def _open_overlay(self):
         self.overlay_open = True
 
@@ -384,6 +437,10 @@ class GameScene(Scene):
             enemy.state = "idle"
             enemy.detected = False
             enemy.alert_time = 0.0
+        # Start a short loading animation to cover any setup delay
+        self.show_loading = True
+        self.loading_timer = self.loading_duration
+        self._loading_angle = 0.0
 
     @override
     def exit(self) -> None:
@@ -409,12 +466,163 @@ class GameScene(Scene):
         # Start cloud transition instead of immediate scene change
         self._start_battle_transition(battle_scene, "battle")
 
+    def _trigger_online_battle(self, opponent_id: int, opponent_monster: dict = None):
+        Logger.info(f"[DEBUG] _trigger_online_battle called: my_id={self.online_manager.player_id if self.online_manager else None}, opponent_id={opponent_id}, opponent_monster={opponent_monster}")
+        """
+        Start a battle with an online player (called when both players agree).
+        """
+        from src.scenes.battle_scene import BattleScene
+        Logger.info(f"Online battle started with player {opponent_id}!")
+
+        # Get our own player ID
+        my_id = self.online_manager.player_id if self.online_manager else -1
+        # Get our own monster
+        my_mon = self.game_manager.bag.monsters[0] if self.game_manager.bag.monsters else None
+
+        # If we are the challenger, our monster is always player_mon
+        # If we are the accepter, the challenger is always player_mon
+        # The server always sends opponent_id as the other player's ID
+        # So, if my_id < opponent_id, I am the challenger (lower ID challenges higher ID)
+        # If my_id > opponent_id, I am the accepter
+        if my_id < 0 or opponent_monster is None or my_mon is None:
+            Logger.warning(f"Could not determine battle roles: my_id={my_id}, opponent_id={opponent_id}, my_mon={my_mon}, opponent_monster={opponent_monster}")
+            return
+
+        # Always use the same order: challenger is player_mon, accepter is enemy_mon
+        if my_id < opponent_id:
+            # I am the challenger
+            player_mon = my_mon
+            enemy_mon = dict(opponent_monster)
+            Logger.info(f"I am the challenger. player_mon={player_mon.get('name')}, enemy_mon={enemy_mon.get('name')}")
+        else:
+            # I am the accepter
+            player_mon = dict(opponent_monster)
+            enemy_mon = my_mon
+            Logger.info(f"I am the accepter. player_mon={player_mon.get('name')}, enemy_mon={enemy_mon.get('name')}")
+
+        enemy_mon["sprite"] = None  # Will be loaded by BattleScene
+        enemy_team = [enemy_mon]
+
+        battle_scene = BattleScene(
+            player=self.game_manager.player,
+            player_mon=player_mon,
+            enemy=enemy_team,
+            bag=self.game_manager.bag,
+            game_manager=self.game_manager
+        )
+
+        # Start cloud transition
+        self._start_battle_transition(battle_scene, f"online_battle_{opponent_id}")
+
+    def _close_online_battle_dialog(self):
+        """Close the online battle confirmation dialog."""
+        self.online_battle_dialog_open = False
+        self.online_battle_target_id = None
+
+    def _get_serializable_monster_data(self) -> dict:
+        """Get the player's active monster data in a format that can be sent over the network."""
+        if not self.game_manager.bag.monsters:
+            Logger.warning("No monsters in bag to serialize!")
+            return None
+        monster = self.game_manager.bag.monsters[0]
+        Logger.info(f"Serializing monster for network: {monster.get('name', 'Unknown')}")
+        # Create a copy without the sprite (can't serialize pygame surfaces)
+        return {
+            "name": monster.get("name", "Unknown"),
+            "hp": monster.get("hp", 50),
+            "max_hp": monster.get("max_hp", 50),
+            "level": monster.get("level", 1),
+            "element": monster.get("element", "Normal"),
+            "sprite_path": monster.get("sprite_path", ""),
+            "moves": monster.get("moves", []),
+            "evolved_form": monster.get("evolved_form", ""),
+            "evolution_level": monster.get("evolution_level", 0),
+        }
+
+    def _confirm_online_battle(self):
+        """Called when user clicks 'Yes' to send battle challenge."""
+        if self.online_battle_target_id is not None and self.online_manager:
+            # Get our monster data to send
+            monster_data = self._get_serializable_monster_data()
+            # Send challenge through server with our monster data
+            self.online_manager.send_battle_challenge(self.online_battle_target_id, monster_data)
+            self.waiting_for_challenge_response = True
+            Logger.info(f"Sent battle challenge to player {self.online_battle_target_id} with monster {monster_data.get('name') if monster_data else 'None'}")
+        self._close_online_battle_dialog()
+
+    def _accept_incoming_challenge(self):
+        """Accept an incoming battle challenge."""
+        if self.incoming_challenge_from_id >= 0 and self.online_manager:
+            # Get our monster data to send
+            monster_data = self._get_serializable_monster_data()
+            self.online_manager.accept_battle_challenge(self.incoming_challenge_from_id, monster_data)
+            Logger.info(f"Accepted battle challenge from player {self.incoming_challenge_from_id}")
+        self.incoming_challenge_open = False
+        self.incoming_challenge_from_id = -1
+        self.incoming_challenge_opponent_monster = None
+
+    def _decline_incoming_challenge(self):
+        """Decline an incoming battle challenge."""
+        if self.incoming_challenge_from_id >= 0 and self.online_manager:
+            self.online_manager.decline_battle_challenge(self.incoming_challenge_from_id)
+            Logger.info(f"Declined battle challenge from player {self.incoming_challenge_from_id}")
+        self.incoming_challenge_open = False
+        self.incoming_challenge_from_id = -1
+        self.incoming_challenge_opponent_monster = None
+
     @override
     def update(self, dt: float):
+        if GameSettings.DEBUG:
+            Logger.debug(f"GameScene.update running, dt={dt}")
+        # If loading animation active, update it and skip normal updates
+        if getattr(self, 'show_loading', False):
+            self.loading_timer -= dt
+            self._loading_angle = (self._loading_angle + dt * 180.0) % 360.0
+            if self.loading_timer <= 0:
+                self.show_loading = False
+            return
         # Update battle transition if active
         if self.transition_active:
             self._update_transition(dt)
             return  # Skip other updates during transition
+        
+        # --- Check for online battle events ---
+        if self.online_manager:
+            # Check if someone is challenging us (allow challenge to appear even if other dialogs are open)
+            challenger_id, challenger_monster = self.online_manager.get_pending_challenge()
+            if challenger_id >= 0 and not self.incoming_challenge_open:
+                # Close other dialogs when a challenge comes in
+                self.online_battle_dialog_open = False
+                self.online_battle_target_id = None
+                self.overlay_open = False
+                self.backpack_open = False
+                self.shop_open = False
+                
+                self.incoming_challenge_open = True
+                self.incoming_challenge_from_id = challenger_id
+                self.incoming_challenge_opponent_monster = challenger_monster
+                monster_name = challenger_monster.get('name', 'None') if challenger_monster else 'None'
+                Logger.info(f"CHALLENGE RECEIVED: from player {challenger_id}, their monster: {monster_name}")
+            
+            # Check if battle should start (both players agreed)
+            battle_opponent, opponent_monster = self.online_manager.get_battle_start_opponent()
+            if battle_opponent >= 0:
+                self.waiting_for_challenge_response = False
+                self.incoming_challenge_open = False
+                monster_name = opponent_monster.get('name', 'None') if opponent_monster else 'None'
+                Logger.info(f"BATTLE STARTING: opponent {battle_opponent}, their monster: {monster_name}")
+                self._trigger_online_battle(battle_opponent, opponent_monster)
+                return  # Don't process other updates, battle is starting
+            
+            # Check if our challenge was declined
+            if self.online_manager.was_challenge_declined():
+                self.waiting_for_challenge_response = False
+                self.challenge_declined_message_timer = 3.0  # Show message for 3 seconds
+                Logger.info("Battle challenge was declined")
+        
+        # Update challenge declined message timer
+        if self.challenge_declined_message_timer > 0:
+            self.challenge_declined_message_timer -= dt
         
         # Update game objects first
         prev_map_key = self.game_manager.current_map_key
@@ -536,12 +744,33 @@ class GameScene(Scene):
         
         # Check for spacebar to trigger battle with alert enemy or bush encounter
         spacebar_pressed = (not self.overlay_open and not self.backpack_open and not self.shop_open and
+                           not self.online_battle_dialog_open and
                            (input_manager.key_pressed(pg.K_SPACE) or input_manager.key_pressed(pg.K_RETURN)))
         
         if spacebar_pressed:
-            # First check if player is near a shopkeeper
+            # First check if player is near an online player
+            online_player_found = False
+            if self.game_manager.player and self.online_manager and len(self.online_animations) > 0:
+                player_pos = self.game_manager.player.position
+                # Check distance to each online player
+                for player_id, animation in self.online_animations.items():
+                    online_pos = Position(animation.rect.x, animation.rect.y)
+                    # Calculate distance (use animation world position)
+                    for player_data in self.online_manager.get_list_players():
+                        if player_data["id"] == player_id and player_data["map"] == self.game_manager.current_map.path_name:
+                            online_world_pos = Position(player_data["x"], player_data["y"])
+                            dist = ((player_pos.x - online_world_pos.x) ** 2 + (player_pos.y - online_world_pos.y) ** 2) ** 0.5
+                            if dist < GameSettings.TILE_SIZE * 2:  # Within 2 tiles
+                                self.online_battle_dialog_open = True
+                                self.online_battle_target_id = player_id
+                                online_player_found = True
+                                break
+                    if online_player_found:
+                        break
+            
+            # If no online player nearby, check for shopkeeper
             shopkeeper_found = False
-            if self.game_manager.player:
+            if not online_player_found and self.game_manager.player:
                 player_rect = self.game_manager.player.get_rect()
                 # Expand rect to check nearby tiles
                 interaction_range = player_rect.inflate(GameSettings.TILE_SIZE * 2, GameSettings.TILE_SIZE * 2)
@@ -552,7 +781,7 @@ class GameScene(Scene):
                         shopkeeper_found = True
                         break
             
-            if not shopkeeper_found:
+            if not online_player_found and not shopkeeper_found:
                 # Check if any enemy is in alert state (detected player)
                 enemy_battle_triggered = False
                 for enemy in self.game_manager.current_enemy_trainers:
@@ -654,6 +883,47 @@ class GameScene(Scene):
 
     # Public: call this from main loop
     def handle_event(self, event: pg.event.Event):
+        # Handle incoming challenge dialog events first if open
+        if self.incoming_challenge_open:
+            if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pg.mouse.get_pos()
+                if self.incoming_challenge_yes_rect.collidepoint(mx, my):
+                    self._accept_incoming_challenge()
+                    return
+                elif self.incoming_challenge_no_rect.collidepoint(mx, my):
+                    self._decline_incoming_challenge()
+                    return
+            if event.type == pg.KEYDOWN:
+                if event.key == pg.K_ESCAPE or event.key == pg.K_n:
+                    self._decline_incoming_challenge()
+                    return
+                elif event.key == pg.K_RETURN or event.key == pg.K_y:
+                    self._accept_incoming_challenge()
+                    return
+            return  # Block other events while dialog is open
+        
+        # Handle online battle dialog events first if open
+        if self.online_battle_dialog_open:
+            if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = pg.mouse.get_pos()
+                if self.online_battle_yes_rect.collidepoint(mx, my):
+                    self._confirm_online_battle()
+                    return
+                elif self.online_battle_no_rect.collidepoint(mx, my):
+                    self._close_online_battle_dialog()
+                    return
+            if event.type == pg.KEYDOWN:
+                if event.key == pg.K_ESCAPE:
+                    self._close_online_battle_dialog()
+                    return
+                elif event.key == pg.K_RETURN or event.key == pg.K_y:
+                    self._confirm_online_battle()
+                    return
+                elif event.key == pg.K_n:
+                    self._close_online_battle_dialog()
+                    return
+            return  # Block other events while dialog is open
+        
         # Handle navigation events first if overlay is active
         if self.navigation_overlay and self.navigation_overlay.active:
             self.navigation_overlay.handle_event(event)
@@ -1180,6 +1450,24 @@ class GameScene(Scene):
 
     @override
     def draw(self, screen: pg.Surface):
+        # If loading animation active, draw rotating ball centered and skip normal draw
+        if getattr(self, 'show_loading', False):
+            screen.fill((0, 0, 0))
+            # draw rotating ball
+            if self.loading_ball_sprite:
+                rotated = pg.transform.rotate(self.loading_ball_sprite, self._loading_angle)
+                r = rotated.get_rect(center=(GameSettings.SCREEN_WIDTH//2, GameSettings.SCREEN_HEIGHT//2))
+                screen.blit(rotated, r.topleft)
+            # draw loading text
+            try:
+                font = pg.font.Font("assets/fonts/Minecraft.ttf", 28)
+            except Exception:
+                font = pg.font.Font(None, 28)
+            text = font.render("Loading...", True, (255, 255, 255))
+            tx = GameSettings.SCREEN_WIDTH//2 - text.get_width()//2
+            ty = GameSettings.SCREEN_HEIGHT//2 + 80
+            screen.blit(text, (tx, ty))
+            return
         # --- Camera ---
         camera = PositionCamera(0, 0)
         if self.game_manager.player:
@@ -1345,10 +1633,188 @@ class GameScene(Scene):
         if self._chat_overlay:
             self._chat_overlay.draw(screen)
         
+        # --- ONLINE BATTLE DIALOG ---
+        if self.online_battle_dialog_open:
+            self._draw_online_battle_dialog(screen)
+        
+        # --- INCOMING CHALLENGE DIALOG ---
+        if self.incoming_challenge_open:
+            self._draw_incoming_challenge_dialog(screen)
+        
+        # --- WAITING FOR RESPONSE / DECLINED MESSAGE ---
+        if self.waiting_for_challenge_response:
+            self._draw_waiting_message(screen)
+        elif self.challenge_declined_message_timer > 0:
+            self._draw_declined_message(screen)
+        
         # --- BATTLE TRANSITION (cloud screen) ---
         if self.transition_active:
             self._draw_transition(screen)
     
+    def _draw_online_battle_dialog(self, screen: pg.Surface) -> None:
+        """Draw the online battle confirmation dialog."""
+        # Dark overlay
+        screen.blit(self._dark_surface, (0, 0))
+        
+        # Dialog box (Pokemon-style)
+        box_color = (255, 165, 0)        # main orange
+        border_color = (200, 120, 0)     # darker orange border
+        highlight_color = (255, 200, 100)
+        
+        # Draw main box
+        pg.draw.rect(screen, box_color, self.online_battle_dialog_rect)
+        pg.draw.rect(screen, border_color, self.online_battle_dialog_rect, 2)
+        
+        # Draw highlights
+        pg.draw.line(screen, highlight_color, 
+                    (self.online_battle_dialog_rect.left + 2, self.online_battle_dialog_rect.top + 2), 
+                    (self.online_battle_dialog_rect.right - 2, self.online_battle_dialog_rect.top + 2))
+        pg.draw.line(screen, highlight_color, 
+                    (self.online_battle_dialog_rect.left + 2, self.online_battle_dialog_rect.top + 2), 
+                    (self.online_battle_dialog_rect.left + 2, self.online_battle_dialog_rect.bottom - 2))
+        
+        # Title
+        title = self._online_battle_title_font.render("Online Battle", True, (20, 20, 20))
+        title_rect = title.get_rect(centerx=self.online_battle_dialog_rect.centerx, 
+                                   top=self.online_battle_dialog_rect.top + 15)
+        screen.blit(title, title_rect)
+        
+        # Question text
+        question = self._online_battle_dialog_font.render(
+            "Would you like to have a battle with this player?", True, (20, 20, 20)
+        )
+        question_rect = question.get_rect(centerx=self.online_battle_dialog_rect.centerx,
+                                         top=self.online_battle_dialog_rect.top + 55)
+        screen.blit(question, question_rect)
+        
+        # Get mouse position for hover effects
+        mx, my = pg.mouse.get_pos()
+        
+        # Yes button
+        yes_hovered = self.online_battle_yes_rect.collidepoint(mx, my)
+        yes_color = (100, 200, 100) if not yes_hovered else (120, 220, 120)
+        pg.draw.rect(screen, yes_color, self.online_battle_yes_rect)
+        pg.draw.rect(screen, (50, 150, 50), self.online_battle_yes_rect, 2)
+        yes_text = self._online_battle_dialog_font.render("Yes", True, (255, 255, 255))
+        yes_text_rect = yes_text.get_rect(center=self.online_battle_yes_rect.center)
+        screen.blit(yes_text, yes_text_rect)
+        
+        # No button
+        no_hovered = self.online_battle_no_rect.collidepoint(mx, my)
+        no_color = (200, 100, 100) if not no_hovered else (220, 120, 120)
+        pg.draw.rect(screen, no_color, self.online_battle_no_rect)
+        pg.draw.rect(screen, (150, 50, 50), self.online_battle_no_rect, 2)
+        no_text = self._online_battle_dialog_font.render("No", True, (255, 255, 255))
+        no_text_rect = no_text.get_rect(center=self.online_battle_no_rect.center)
+        screen.blit(no_text, no_text_rect)
+
+    def _draw_incoming_challenge_dialog(self, screen: pg.Surface) -> None:
+        """Draw the incoming battle challenge dialog."""
+        # Dark overlay
+        screen.blit(self._dark_surface, (0, 0))
+        
+        # Side notification banner (right side of screen) for extra visibility
+        banner_w, banner_h = 250, 60
+        banner_x = GameSettings.SCREEN_WIDTH - banner_w - 20
+        banner_y = 100
+        banner_rect = pg.Rect(banner_x, banner_y, banner_w, banner_h)
+        
+        # Animated pulsing effect
+        pulse = abs(math.sin(time.monotonic() * 3)) * 0.3 + 0.7
+        pulse_color = (int(255 * pulse), int(100 * pulse), int(100 * pulse))
+        
+        pg.draw.rect(screen, pulse_color, banner_rect)
+        pg.draw.rect(screen, (200, 50, 50), banner_rect, 3)
+        
+        side_text = self._online_battle_dialog_font.render("⚔ BATTLE CHALLENGE! ⚔", True, (255, 255, 255))
+        side_text_rect = side_text.get_rect(center=banner_rect.center)
+        screen.blit(side_text, side_text_rect)
+        
+        # Dialog box (Pokemon-style) in center
+        box_color = (255, 165, 0)
+        border_color = (200, 120, 0)
+        highlight_color = (255, 200, 100)
+        
+        # Draw main box
+        pg.draw.rect(screen, box_color, self.incoming_challenge_dialog_rect)
+        pg.draw.rect(screen, border_color, self.incoming_challenge_dialog_rect, 2)
+        
+        # Draw highlights
+        pg.draw.line(screen, highlight_color, 
+                    (self.incoming_challenge_dialog_rect.left + 2, self.incoming_challenge_dialog_rect.top + 2), 
+                    (self.incoming_challenge_dialog_rect.right - 2, self.incoming_challenge_dialog_rect.top + 2))
+        pg.draw.line(screen, highlight_color, 
+                    (self.incoming_challenge_dialog_rect.left + 2, self.incoming_challenge_dialog_rect.top + 2), 
+                    (self.incoming_challenge_dialog_rect.left + 2, self.incoming_challenge_dialog_rect.bottom - 2))
+        
+        # Title
+        title = self._online_battle_title_font.render("Battle Challenge!", True, (20, 20, 20))
+        title_rect = title.get_rect(centerx=self.incoming_challenge_dialog_rect.centerx, 
+                                   top=self.incoming_challenge_dialog_rect.top + 15)
+        screen.blit(title, title_rect)
+        
+        # Challenge text
+        challenge_text = self._online_battle_dialog_font.render(
+            f"A player is challenging you to a battle!", True, (20, 20, 20)
+        )
+        challenge_rect = challenge_text.get_rect(centerx=self.incoming_challenge_dialog_rect.centerx,
+                                                top=self.incoming_challenge_dialog_rect.top + 55)
+        screen.blit(challenge_text, challenge_rect)
+        
+        # Get mouse position for hover effects
+        mx, my = pg.mouse.get_pos()
+        
+        # Accept button
+        yes_hovered = self.incoming_challenge_yes_rect.collidepoint(mx, my)
+        yes_color = (100, 200, 100) if not yes_hovered else (120, 220, 120)
+        pg.draw.rect(screen, yes_color, self.incoming_challenge_yes_rect)
+        pg.draw.rect(screen, (50, 150, 50), self.incoming_challenge_yes_rect, 2)
+        yes_text = self._online_battle_dialog_font.render("Accept", True, (255, 255, 255))
+        yes_text_rect = yes_text.get_rect(center=self.incoming_challenge_yes_rect.center)
+        screen.blit(yes_text, yes_text_rect)
+        
+        # Decline button
+        no_hovered = self.incoming_challenge_no_rect.collidepoint(mx, my)
+        no_color = (200, 100, 100) if not no_hovered else (220, 120, 120)
+        pg.draw.rect(screen, no_color, self.incoming_challenge_no_rect)
+        pg.draw.rect(screen, (150, 50, 50), self.incoming_challenge_no_rect, 2)
+        no_text = self._online_battle_dialog_font.render("Decline", True, (255, 255, 255))
+        no_text_rect = no_text.get_rect(center=self.incoming_challenge_no_rect.center)
+        screen.blit(no_text, no_text_rect)
+
+    def _draw_waiting_message(self, screen: pg.Surface) -> None:
+        """Draw 'Waiting for response...' message."""
+        # Semi-transparent overlay at top of screen
+        msg_w, msg_h = 350, 50
+        msg_rect = pg.Rect(
+            (GameSettings.SCREEN_WIDTH - msg_w) // 2, 20, msg_w, msg_h
+        )
+        
+        # Draw background
+        pg.draw.rect(screen, (50, 50, 50, 200), msg_rect)
+        pg.draw.rect(screen, (255, 200, 100), msg_rect, 2)
+        
+        # Draw text
+        text = self._online_battle_dialog_font.render("Waiting for response...", True, (255, 255, 255))
+        text_rect = text.get_rect(center=msg_rect.center)
+        screen.blit(text, text_rect)
+
+    def _draw_declined_message(self, screen: pg.Surface) -> None:
+        """Draw 'Challenge declined' message."""
+        msg_w, msg_h = 300, 50
+        msg_rect = pg.Rect(
+            (GameSettings.SCREEN_WIDTH - msg_w) // 2, 20, msg_w, msg_h
+        )
+        
+        # Draw background
+        pg.draw.rect(screen, (100, 50, 50), msg_rect)
+        pg.draw.rect(screen, (200, 100, 100), msg_rect, 2)
+        
+        # Draw text
+        text = self._online_battle_dialog_font.render("Challenge declined", True, (255, 255, 255))
+        text_rect = text.get_rect(center=msg_rect.center)
+        screen.blit(text, text_rect)
+
     def _draw_chat_bubbles(self, screen: pg.Surface, camera: PositionCamera) -> None:
         """Draw chat bubbles above players."""
         if not self.online_manager:

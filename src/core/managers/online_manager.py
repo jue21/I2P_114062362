@@ -30,6 +30,11 @@ class OnlineManager:
     _chat_out_queue: queue.Queue
     _chat_messages: collections.deque
     _last_chat_id: int
+    # Battle challenge state
+    _battle_out_queue: queue.Queue
+    _pending_challenge_from: int  # ID of player who challenged us
+    _battle_start_opponent: int  # ID of opponent when battle should start
+    _battle_declined: bool  # Whether our challenge was declined
 
     def __init__(self):
         if websockets is None:
@@ -56,6 +61,14 @@ class OnlineManager:
         self._chat_out_queue = queue.Queue(maxsize=50)
         self._chat_messages = deque(maxlen=200)
         self._last_chat_id = 0
+        
+        # Battle challenge state
+        self._battle_out_queue = queue.Queue(maxsize=10)
+        self._pending_challenge_from = -1
+        self._pending_opponent_monster = None  # Monster data from challenger
+        self._battle_start_opponent = -1
+        self._battle_start_opponent_monster = None  # Monster data for battle start
+        self._battle_declined = False
 
         Logger.info("OnlineManager initialized")
 
@@ -210,6 +223,38 @@ class OnlineManager:
                         if mid > self._last_chat_id:
                             self._last_chat_id = mid
 
+            elif msg_type == "battle_challenge_received":
+                # Another player is challenging us to battle
+                challenger_id = int(data.get("from", -1))
+                opponent_monster = data.get("opponent_monster", None)
+                monster_name = opponent_monster.get('name', 'None') if opponent_monster else 'None'
+                Logger.info(f"[OnlineManager] battle_challenge_received from {challenger_id}, monster: {monster_name}")
+                if challenger_id >= 0:
+                    with self._lock:
+                        self._pending_challenge_from = challenger_id
+                        self._pending_opponent_monster = opponent_monster
+                    Logger.info(f"Received battle challenge from player {challenger_id}")
+
+            elif msg_type == "battle_start":
+                # Battle is starting (both players agreed)
+                opponent_id = int(data.get("opponent_id", -1))
+                opponent_monster = data.get("opponent_monster", None)
+                monster_name = opponent_monster.get('name', 'None') if opponent_monster else 'None'
+                Logger.info(f"[OnlineManager] battle_start received: opponent {opponent_id}, monster: {monster_name}")
+                if opponent_id >= 0:
+                    with self._lock:
+                        self._battle_start_opponent = opponent_id
+                        self._battle_start_opponent_monster = opponent_monster
+                        self._pending_challenge_from = -1  # Clear pending challenge
+                        self._pending_opponent_monster = None
+                    Logger.info(f"Battle starting with player {opponent_id}")
+
+            elif msg_type == "battle_declined":
+                # Our challenge was declined
+                with self._lock:
+                    self._battle_declined = True
+                Logger.info("Battle challenge was declined")
+
             elif msg_type == "error":
                 Logger.warning(f"Server error: {data.get('message', 'unknown')}")
 
@@ -260,6 +305,14 @@ class OnlineManager:
                 except queue.Empty:
                     pass
 
+                # Send battle messages
+                try:
+                    battle_msg = self._battle_out_queue.get_nowait()
+                    if self.player_id >= 0:
+                        await websocket.send(json.dumps(battle_msg))
+                except queue.Empty:
+                    pass
+
                 await asyncio.sleep(0.01)  # Small sleep to prevent busy waiting
 
             except Exception as e:
@@ -281,3 +334,75 @@ class OnlineManager:
     def get_recent_chat(self, limit: int = 50) -> list[dict]:
         with self._lock:
             return list(self._chat_messages)[-limit:]
+
+    # --- Battle Challenge Methods ---
+    
+    def send_battle_challenge(self, target_id: int, monster_data: dict = None) -> bool:
+        """Send a battle challenge to another player with our monster data."""
+        if self.player_id == -1 or target_id < 0:
+            return False
+        try:
+            self._battle_out_queue.put_nowait({
+                "type": "battle_challenge",
+                "target_id": target_id,
+                "monster_data": monster_data
+            })
+            return True
+        except queue.Full:
+            return False
+
+    def accept_battle_challenge(self, challenger_id: int, monster_data: dict = None) -> bool:
+        """Accept a battle challenge from another player with our monster data."""
+        if self.player_id == -1 or challenger_id < 0:
+            return False
+        try:
+            self._battle_out_queue.put_nowait({
+                "type": "battle_accept",
+                "challenger_id": challenger_id,
+                "monster_data": monster_data
+            })
+            return True
+        except queue.Full:
+            return False
+
+    def decline_battle_challenge(self, challenger_id: int) -> bool:
+        """Decline a battle challenge from another player."""
+        if self.player_id == -1 or challenger_id < 0:
+            return False
+        try:
+            self._battle_out_queue.put_nowait({
+                "type": "battle_decline",
+                "challenger_id": challenger_id
+            })
+            with self._lock:
+                self._pending_challenge_from = -1
+            return True
+        except queue.Full:
+            return False
+
+    def get_pending_challenge(self) -> tuple[int, dict]:
+        """Get the player ID who is challenging us and their monster data, or (-1, None) if none."""
+        with self._lock:
+            return (self._pending_challenge_from, self._pending_opponent_monster)
+
+    def clear_pending_challenge(self) -> None:
+        """Clear the pending challenge."""
+        with self._lock:
+            self._pending_challenge_from = -1
+            self._pending_opponent_monster = None
+
+    def get_battle_start_opponent(self) -> tuple[int, dict]:
+        """Get the opponent ID and monster data for a battle that should start, or (-1, None) if none."""
+        with self._lock:
+            opponent = self._battle_start_opponent
+            monster = self._battle_start_opponent_monster
+            self._battle_start_opponent = -1  # Clear after reading
+            self._battle_start_opponent_monster = None
+            return (opponent, monster)
+
+    def was_challenge_declined(self) -> bool:
+        """Check if our challenge was declined."""
+        with self._lock:
+            declined = self._battle_declined
+            self._battle_declined = False  # Clear after reading
+            return declined
